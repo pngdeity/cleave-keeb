@@ -4,7 +4,7 @@ A 65% wireless split keyboard.
 
 * Keyboard Maintainer: [yangzheng20003](https://github.com/yangzheng20003)
 * Hardware Supported: EPOMAKER Split65 (WB32FQ95)
-* Hardware Availability: EPOMAKER
+* Hardware Availability: [epomaker](https://www.epomaker.com)
 
 Make example for this keyboard (after setting up your build environment):
 

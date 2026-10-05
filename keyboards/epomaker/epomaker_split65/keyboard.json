@@ -237,7 +237,7 @@
         }
     },
     "tap_keycode_delay": 10,
-    "url": "",
+    "url": "https://www.epomaker.com",
     "usb": {
         "device_version": "0.3.0",
         "force_nkro": true,
