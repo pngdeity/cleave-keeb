@@ -11,6 +11,11 @@
 #define BAT_FULL_PIN                        A15
 #define BAT_FULL_STATE                      1
 
+/* Battery reporting over raw HID (see PROTOCOL.md) */
+#define KB_BATTERY_MODEL_ID                 1 // Split65
+#define WLS_BATTERY_PUSH_ENABLE
+#define WLS_BATTERY_PUSH_INTERVAL           2000
+
 #define MATRIX_ROWS 12
 #define MATRIX_COLS 9
 
@@ -47,6 +52,7 @@
 
 /* Status Indicator Lamp */
 #define HS_MATRIX_BLINK_INDEX_BAT           63
+#define HS_MATRIX_BAT_SOFT_INDEX            64
 #define HS_RGB_INDEX_CAPS                   2
 #define HS_RGB_INDEX_WIN_LOCK               1
 
@@ -88,6 +94,11 @@
 /* RGB Matrix */
 #define RGB_MATRIX_FRAMEBUFFER_EFFECTS
 #define RGB_MATRIX_KEYPRESSES
+
+/* Default lighting lives in keyboard.json (`rgb_matrix.default`): a solid
+ * comfortable white at half brightness rather than the vendor's rainbow wave.
+ * Do not define RGB_MATRIX_DEFAULT_* here — config.h and keyboard.json would
+ * then disagree and `qmk lint` warns on the duplicate. */
 
 /* WS2812 */
 #define WS2812_SPI_DRIVER  SPIDM2

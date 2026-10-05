@@ -61,3 +61,15 @@ bool is_keyboard_master(void) {
     return readPin(SPLIT_HAND_PIN);
 }
 
+/* Force a solid white at half brightness instead of the vendor's rainbow wave.
+ * RGB_MATRIX_DEFAULT_* only apply to a blank EEPROM, and these halves carry
+ * saved RGB settings from the stock firmware, so the stored state wins unless
+ * we set it here. The non-_noeeprom variants persist this to EEPROM, making it
+ * the permanent stored state: it survives a power cycle, and any live changes
+ * (RGB_MOD, brightness keys) are saved too but overwritten back to this on the
+ * next boot. */
+void keyboard_post_init_user(void) {
+    rgb_matrix_mode(RGB_MATRIX_SOLID_COLOR);
+    rgb_matrix_sethsv(RGB_MATRIX_DEFAULT_HUE, RGB_MATRIX_DEFAULT_SAT, RGB_MATRIX_DEFAULT_VAL);
+}
+

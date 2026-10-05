@@ -23,6 +23,7 @@ typedef union {
         uint8_t last_btdevs : 3;
         uint8_t dir_flag : 1;
         uint8_t filp : 1;
+        uint8_t last_wireless_devs : 3;
     };
 } confinfo_t;
 confinfo_t confinfo;
@@ -107,6 +108,7 @@ void eeconfig_confinfo_default(void) {
     confinfo.record_last_mode = 0xff;
     confinfo.last_btdevs      = 1;
     confinfo.dir_flag         = 0;
+    confinfo.last_wireless_devs = DEVS_BT1;
 
     // #ifdef WIRELESS_ENABLE
     //     confinfo.devs = DEVS_USB;
@@ -141,6 +143,13 @@ void eeconfig_confinfo_init(void) {
     confinfo.raw = eeconfig_confinfo_read();
     if (!confinfo.raw) {
         eeconfig_confinfo_default();
+    }
+    /* last_wireless_devs is a newer field: an EEPROM written by older firmware
+     * leaves it 0 (DEVS_USB), which is not a valid "last wireless device" to
+     * restore to. Reset it to a sane default. */
+    if (confinfo.last_wireless_devs > DEVS_2G4 || confinfo.last_wireless_devs == DEVS_USB) {
+        confinfo.last_wireless_devs = DEVS_BT1;
+        eeconfig_confinfo_update(confinfo.raw);
     }
 }
 
@@ -330,6 +339,8 @@ void wireless_post_task(void) {
 #    if defined(HS_BT_DEF_PIN) && defined(HS_2G4_DEF_PIN)
     hs_mode_scan(false, confinfo.devs, confinfo.last_btdevs);
 #    endif
+
+    kb_battery_push_task();
 }
 
 uint32_t wls_process_long_press(uint32_t trigger_time, void *cb_arg) {
@@ -1209,10 +1220,30 @@ bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
 void housekeeping_task_user(void) { // loop
     uint8_t hs_now_mode;
     static uint32_t hs_current_time;
+    static bool prev_cable_state = false;
 
     charging_state = readPin(HS_BAT_CABLE_PIN);
 
     bat_full_flag = readPin(BAT_FULL_PIN);
+
+    /* USB cable insert/remove switches the active transport, and remembers the
+     * last wireless transport so it can be restored on removal. Master half
+     * only: wireless_devs_change() mutates global radio state and is not
+     * master-gated, and the slave does not own the transport. */
+    if (is_keyboard_master()) {
+        if (charging_state && !prev_cable_state) {
+            uint8_t current_devs = wireless_get_current_devs();
+            if (current_devs != DEVS_USB) {
+                confinfo.last_wireless_devs = current_devs;
+                wireless_devs_change(current_devs, DEVS_USB, false);
+            }
+        } else if (!charging_state && prev_cable_state) {
+            if (confinfo.last_wireless_devs != DEVS_USB) {
+                wireless_devs_change(DEVS_USB, confinfo.last_wireless_devs, false);
+            }
+        }
+    }
+    prev_cable_state = charging_state;
 
     if (charging_state && (bat_full_flag)) {
         hs_now_mode = MD_SND_CMD_DEVCTRL_CHARGING_DONE;
@@ -1398,9 +1429,27 @@ void rgb_matrix_hs_bat(void) {
 bool temp,im_test_rate_flag;
 void bat_indicators(void) {
     static uint32_t battery_process_time = 0;
+    uint8_t bat_level = *md_getp_bat();
 
     if (!is_keyboard_master())  {
         return;
+    }
+
+    /* Always-on soft battery indicator at HS_MATRIX_BAT_SOFT_INDEX. */
+    if (rgb_matrix_get_val() != 0) {
+        if (charging_state && (bat_full_flag)) {
+            rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX, 0x00, 0x06, 0x00);
+        } else if (charging_state) {
+            rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX, 0x04, 0x00, 0x10);
+        } else if (bat_level >= 50) {
+            rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX, 0x00, 0x10, 0x00);
+        } else if (bat_level >= 30) {
+            rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX, 0x10, 0x0A, 0x00);
+        } else if (bat_level > BATTERY_CAPACITY_LOW) {
+            rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX, 0x10, 0x00, 0x00);
+        } else {
+            rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX, 0x30, 0x00, 0x00);
+        }
     }
 
     if (charging_state && (bat_full_flag)) {
@@ -1410,11 +1459,11 @@ void bat_indicators(void) {
 
         battery_process_time = 0;
         if (im_bat_req_charging_flag) rgb_matrix_set_color(HS_MATRIX_BLINK_INDEX_BAT, 0x00, 0xFF, 0x00);
-    } else if (*md_getp_bat() <= BATTERY_CAPACITY_LOW) {
+    } else if (bat_level <= BATTERY_CAPACITY_LOW) {
 
         rgb_matrix_hs_bat_set(HS_MATRIX_BLINK_INDEX_BAT, (RGB){0xFF, 0x00, 0x00}, 250, 1);
 
-        if (*md_getp_bat() <= BATTERY_CAPACITY_STOP) {
+        if (bat_level <= BATTERY_CAPACITY_STOP) {
             if (!battery_process_time) {
                 battery_process_time = timer_read32();
             }
@@ -1630,6 +1679,13 @@ void hs_reset_settings(void) {
 
 void lpwr_wakeup_hook(void) {
     hs_mode_scan(false, confinfo.devs, confinfo.last_btdevs);
+
+    /* If the board woke up with the USB cable attached, switch onto USB and
+     * remember the wireless transport it came from. */
+    if (readPin(HS_BAT_CABLE_PIN) && wireless_get_current_devs() != DEVS_USB) {
+        confinfo.last_wireless_devs = wireless_get_current_devs();
+        wireless_devs_change(wireless_get_current_devs(), DEVS_USB, false);
+    }
 
     if (rgb_matrix_get_val() != 0){
         gpio_write_pin_high(LED_POWER_EN_PIN);

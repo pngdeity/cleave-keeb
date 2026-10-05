@@ -1,4 +1,8 @@
+// Copyright 2026
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 #include "wls.h"
+#include "usb_descriptor.h"
 
 static ioline_t col_pins[MATRIX_COLS] = MATRIX_COL_PINS;
 static ioline_t col_pins_r[MATRIX_COLS] = MATRIX_COL_PINS_RIGHT;
@@ -210,4 +214,38 @@ void lpwr_stop_hook_post(void) {
             } break;
         }
     }
+}
+
+uint8_t kb_battery_percent(void) {
+    uint8_t bat = *md_getp_bat();
+    return bat > 100 ? 100 : bat;
+}
+
+uint8_t kb_charging_state(void) {
+    if (!charging_state) {
+        return 0;
+    }
+    return bat_full_flag ? 2 : 1;
+}
+
+uint8_t kb_transport_byte(void) {
+    uint8_t devs = wireless_get_current_devs();
+
+    if (devs == DEVS_USB) {
+        return 0x01;
+    }
+    if (devs == DEVS_2G4) {
+        return 0x04;
+    }
+    return 0x02;
+}
+
+void kb_battery_report_fill(uint8_t *buf) {
+    /* memset zeroes bytes 2-3 (reserved) and 7-31 (padding). */
+    memset(buf, 0, RAW_EPSIZE);
+    buf[0] = KB_BATTERY_CMD_GET;
+    buf[1] = kb_battery_percent();
+    buf[4] = kb_charging_state();
+    buf[5] = kb_transport_byte();
+    buf[6] = KB_BATTERY_MODEL_ID;
 }

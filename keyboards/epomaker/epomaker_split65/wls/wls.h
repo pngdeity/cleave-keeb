@@ -1,3 +1,8 @@
+// Copyright 2026
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+#pragma once
+
 #include QMK_KEYBOARD_H
 
 #include "quantum.h"
@@ -25,7 +30,23 @@ enum modeio_mode {
 };
 
 extern bool lower_sleep;
+extern bool charging_state;
+extern bool bat_full_flag;
 bool hs_rgb_blink_hook(void);
 bool hs_mode_scan(bool update, uint8_t moude, uint8_t lsat_btdev);
 bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev);
 void hs_rgb_blink_set_timer(uint32_t time);
+
+#define KB_BATTERY_CMD_GET 0xA4
+
+/* Identifies the keyboard model in the battery report (see PROTOCOL.md).
+ * Override in the keyboard's config.h. */
+#ifndef KB_BATTERY_MODEL_ID
+#    define KB_BATTERY_MODEL_ID 0
+#endif
+
+uint8_t kb_battery_percent(void);
+uint8_t kb_charging_state(void);
+uint8_t kb_transport_byte(void);
+void    kb_battery_report_fill(uint8_t *buf);
+void    kb_battery_push_task(void);
