@@ -4,7 +4,7 @@
     "maintainer": "yangzheng20003",
     "bootloader": "wb32-dfu",
     "bootmagic": {
-        "matrix": [0, 0]
+        "matrix": [1, 0]
     },
     "debounce": 1,
     "diode_direction": "ROW2COL",
