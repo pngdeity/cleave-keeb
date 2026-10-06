@@ -191,13 +191,10 @@ void palcallback_cb(uint8_t line) {
 void lpwr_stop_hook_pre(void) {
 
     gpio_write_pin_low(LED_POWER_EN_PIN);
-    gpio_write_pin_low(A9);
- 
 
     if (lower_sleep) {
         md_send_devctrl(MD_SND_CMD_DEVCTRL_USB);
         wait_ms(200);
-        lpwr_set_sleep_wakeupcd(LPWR_WAKEUP_UART);
     }
 }
 
@@ -205,7 +202,9 @@ void lpwr_stop_hook_post(void) {
     if (lower_sleep) {
         switch (lpwr_get_sleep_wakeupcd()) {
             case LPWR_WAKEUP_USB:
-            case LPWR_WAKEUP_CABLE: {
+            case LPWR_WAKEUP_CABLE:
+            case LPWR_WAKEUP_SWITCH:
+            case LPWR_WAKEUP_MATRIX: {
                 lower_sleep = false;
                 lpwr_set_state(LPWR_WAKEUP);
             } break;
