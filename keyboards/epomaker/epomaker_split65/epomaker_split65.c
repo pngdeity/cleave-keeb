@@ -1220,6 +1220,41 @@ bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
     return true;
 }
 
+/* Single arbiter for cable-driven transport changes.
+ *
+ * Every path that reacts to the USB cable must go through here so the
+ * "switch to USB on insert, restore the remembered wireless transport on
+ * remove" policy lives in exactly one place. Callers previously mutated
+ * confinfo.last_wireless_devs and wireless_devs_change() independently
+ * (housekeeping and lpwr_wakeup_hook), which could interleave. Master only:
+ * wireless_devs_change() is not master-gated and the slave does not own the
+ * transport.
+ *
+ * cable_present is the freshly sampled HS_BAT_CABLE_PIN level; prev_present is
+ * the caller's last known level (false at first call so an already-inserted
+ * cable is treated as an insert). Returns true if a transport change was
+ * issued. */
+bool hs_transport_arbitrate_cable(bool cable_present, bool prev_present) {
+    if (!is_keyboard_master()) {
+        return false;
+    }
+
+    if (cable_present && !prev_present) {
+        uint8_t current_devs = wireless_get_current_devs();
+        if (current_devs != DEVS_USB) {
+            confinfo.last_wireless_devs = current_devs;
+            wireless_devs_change(current_devs, DEVS_USB, false);
+            return true;
+        }
+    } else if (!cable_present && prev_present) {
+        if (confinfo.last_wireless_devs != DEVS_USB) {
+            wireless_devs_change(DEVS_USB, confinfo.last_wireless_devs, false);
+            return true;
+        }
+    }
+    return false;
+}
+
 void housekeeping_task_user(void) { // loop
     uint8_t hs_now_mode;
     static uint32_t hs_current_time;
@@ -1229,23 +1264,7 @@ void housekeeping_task_user(void) { // loop
 
     bat_full_flag = readPin(BAT_FULL_PIN);
 
-    /* USB cable insert/remove switches the active transport, and remembers the
-     * last wireless transport so it can be restored on removal. Master half
-     * only: wireless_devs_change() mutates global radio state and is not
-     * master-gated, and the slave does not own the transport. */
-    if (is_keyboard_master()) {
-        if (charging_state && !prev_cable_state) {
-            uint8_t current_devs = wireless_get_current_devs();
-            if (current_devs != DEVS_USB) {
-                confinfo.last_wireless_devs = current_devs;
-                wireless_devs_change(current_devs, DEVS_USB, false);
-            }
-        } else if (!charging_state && prev_cable_state) {
-            if (confinfo.last_wireless_devs != DEVS_USB) {
-                wireless_devs_change(DEVS_USB, confinfo.last_wireless_devs, false);
-            }
-        }
-    }
+    hs_transport_arbitrate_cable(charging_state, prev_cable_state);
     prev_cable_state = charging_state;
 
     if (charging_state && (bat_full_flag)) {
@@ -1684,11 +1703,9 @@ void lpwr_wakeup_hook(void) {
     hs_mode_scan(false, confinfo.devs, confinfo.last_btdevs);
 
     /* If the board woke up with the USB cable attached, switch onto USB and
-     * remember the wireless transport it came from. */
-    if (readPin(HS_BAT_CABLE_PIN) && wireless_get_current_devs() != DEVS_USB) {
-        confinfo.last_wireless_devs = wireless_get_current_devs();
-        wireless_devs_change(wireless_get_current_devs(), DEVS_USB, false);
-    }
+     * remember the wireless transport it came from. Shared with
+     * housekeeping_task_user so the policy has one home. */
+    hs_transport_arbitrate_cable(readPin(HS_BAT_CABLE_PIN), false);
 
     if (rgb_matrix_get_val() != 0){
         gpio_write_pin_high(LED_POWER_EN_PIN);

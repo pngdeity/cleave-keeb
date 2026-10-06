@@ -172,13 +172,13 @@ void palcallback_cb(uint8_t line) {
             lpwr_set_sleep_wakeupcd(LPWR_WAKEUP_CABLE);
         } break;
 #ifdef HS_BT_DEF_PIN
-        case PAL_PAD(HS_2G4_DEF_PIN): {
+        case PAL_PAD(HS_BT_DEF_PIN): {
             lpwr_set_sleep_wakeupcd(LPWR_WAKEUP_SWITCH);
         } break;
 #endif
 
 #ifdef HS_2G4_DEF_PIN
-        case PAL_PAD(HS_BT_DEF_PIN): {
+        case PAL_PAD(HS_2G4_DEF_PIN): {
             lpwr_set_sleep_wakeupcd(LPWR_WAKEUP_SWITCH);
         } break;
 #endif
@@ -239,27 +239,22 @@ uint8_t kb_battery_transport(void) {
     return KB_BATTERY_TRANSPORT_BT;
 }
 
-bool kb_battery_changed(void) {
+bool kb_battery_changed(const kb_battery_snapshot_t *snap) {
     static uint8_t last_percent = 0xff, last_charge = 0xff, last_transport = 0xff;
-    uint8_t percent = kb_battery_percent();
-    uint8_t charge = kb_battery_charge();
-    uint8_t transport = kb_battery_transport();
 
-    if (percent == last_percent && charge == last_charge && transport == last_transport) {
+    if (snap->percent == last_percent && snap->charge == last_charge && snap->transport == last_transport) {
         return false;
     }
-    last_percent = percent;
-    last_charge = charge;
-    last_transport = transport;
+    last_percent   = snap->percent;
+    last_charge    = snap->charge;
+    last_transport = snap->transport;
     return true;
 }
 
-void kb_battery_report_fill(uint8_t *buf) {
-    /* memset zeroes the reserved and padding bytes. */
-    memset(buf, 0, RAW_EPSIZE);
-    buf[KB_BATTERY_IDX_CMD] = KB_BATTERY_CMD_GET;
-    buf[KB_BATTERY_IDX_LEVEL] = kb_battery_percent();
-    buf[KB_BATTERY_IDX_CHARGE] = kb_battery_charge();
-    buf[KB_BATTERY_IDX_TRANSPORT] = kb_battery_transport();
-    buf[KB_BATTERY_IDX_MODEL] = KB_BATTERY_MODEL_ID;
+void kb_battery_snapshot(kb_battery_snapshot_t *out) {
+    /* Sample live sources exactly once, then derive every field from that
+     * single sample so callers cannot observe a torn state. */
+    out->transport = kb_battery_transport();
+    out->percent   = kb_battery_percent();
+    out->charge    = kb_battery_charge();
 }

@@ -36,6 +36,7 @@ bool hs_rgb_blink_hook(void);
 bool hs_mode_scan(bool update, uint8_t moude, uint8_t lsat_btdev);
 bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev);
 void hs_rgb_blink_set_timer(uint32_t time);
+bool hs_transport_arbitrate_cable(bool cable_present, bool prev_present);
 
 /* Battery report over raw HID (see docs/PROTOCOL.md). The report is
  * RAW_EPSIZE bytes; only the following are meaningful, the rest are zero. */
@@ -68,6 +69,16 @@ enum kb_battery_charge {
 uint8_t kb_battery_percent(void);
 uint8_t kb_battery_charge(void);
 uint8_t kb_battery_transport(void);
-bool    kb_battery_changed(void);
-void    kb_battery_report_fill(uint8_t *buf);
+
+/* A consistent point-in-time read of the battery state. The three fields are
+ * sampled together so that change detection and report assembly observe the
+ * same values instead of re-reading live globals at different moments. */
+typedef struct {
+    uint8_t percent;
+    uint8_t charge;
+    uint8_t transport;
+} kb_battery_snapshot_t;
+
+void    kb_battery_snapshot(kb_battery_snapshot_t *out);
+bool    kb_battery_changed(const kb_battery_snapshot_t *snap);
 void    kb_battery_push_task(void);

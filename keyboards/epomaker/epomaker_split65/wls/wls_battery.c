@@ -16,10 +16,16 @@
  * directly. */
 void replaced_hid_send(uint8_t *, uint8_t);
 
-static void kb_battery_send(void) {
+static void kb_battery_send(const kb_battery_snapshot_t *snap) {
     uint8_t buf[RAW_EPSIZE];
 
-    kb_battery_report_fill(buf);
+    /* Assemble from one consistent sample of the live sources. */
+    memset(buf, 0, RAW_EPSIZE);
+    buf[KB_BATTERY_IDX_CMD]       = KB_BATTERY_CMD_GET;
+    buf[KB_BATTERY_IDX_LEVEL]     = snap->percent;
+    buf[KB_BATTERY_IDX_CHARGE]    = snap->charge;
+    buf[KB_BATTERY_IDX_TRANSPORT] = snap->transport;
+    buf[KB_BATTERY_IDX_MODEL]     = KB_BATTERY_MODEL_ID;
     replaced_hid_send(buf, RAW_EPSIZE);
 }
 
@@ -34,12 +40,15 @@ void raw_hid_receive(uint8_t *data, uint8_t length) {
         return;
     }
 
-    kb_battery_send();
+    kb_battery_snapshot_t snap;
+    kb_battery_snapshot(&snap);
+    kb_battery_send(&snap);
 }
 
 #    ifdef WLS_BATTERY_PUSH_ENABLE
 void kb_battery_push_task(void) {
     static uint32_t push_timer = 0x00;
+    kb_battery_snapshot_t snap;
 
     if (!is_keyboard_master() || get_transport() == TRANSPORT_USB || *md_getp_state() != MD_STATE_CONNECTED) {
         push_timer = 0x00;
@@ -48,9 +57,10 @@ void kb_battery_push_task(void) {
 
     /* Send when the value changes; otherwise a slow keepalive. This is a
      * battery-powered radio, so an unconditional fast heartbeat is wasteful. */
-    if (kb_battery_changed() || sync_timer_elapsed32(push_timer) >= WLS_BATTERY_PUSH_INTERVAL) {
+    kb_battery_snapshot(&snap);
+    if (kb_battery_changed(&snap) || sync_timer_elapsed32(push_timer) >= WLS_BATTERY_PUSH_INTERVAL) {
         push_timer = sync_timer_read32();
-        kb_battery_send();
+        kb_battery_send(&snap);
     }
 }
 #    else
