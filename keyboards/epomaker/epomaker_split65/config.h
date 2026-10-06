@@ -12,9 +12,11 @@
 #define BAT_FULL_STATE                      1
 
 /* Battery reporting over raw HID (see PROTOCOL.md) */
-#define KB_BATTERY_MODEL_ID                 1 // Split65
+#define KB_BATTERY_MODEL_ID 1 // Split65
 #define WLS_BATTERY_PUSH_ENABLE
-#define WLS_BATTERY_PUSH_INTERVAL           2000
+/* Push reloads the value to the host on change; this bounds how stale an
+ * unchanged host view may become (a slow keepalive, not the send rate). */
+#define WLS_BATTERY_PUSH_INTERVAL 10000
 
 #define MATRIX_ROWS 12
 #define MATRIX_COLS 9

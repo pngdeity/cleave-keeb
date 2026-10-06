@@ -46,12 +46,12 @@ void kb_battery_push_task(void) {
         return;
     }
 
-    if (sync_timer_elapsed32(push_timer) < WLS_BATTERY_PUSH_INTERVAL) {
-        return;
+    /* Send when the value changes; otherwise a slow keepalive. This is a
+     * battery-powered radio, so an unconditional fast heartbeat is wasteful. */
+    if (kb_battery_changed() || sync_timer_elapsed32(push_timer) >= WLS_BATTERY_PUSH_INTERVAL) {
+        push_timer = sync_timer_read32();
+        kb_battery_send();
     }
-    push_timer = sync_timer_read32();
-
-    kb_battery_send();
 }
 #    else
 void kb_battery_push_task(void) {}

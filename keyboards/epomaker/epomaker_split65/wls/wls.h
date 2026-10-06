@@ -37,7 +37,27 @@ bool hs_mode_scan(bool update, uint8_t moude, uint8_t lsat_btdev);
 bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev);
 void hs_rgb_blink_set_timer(uint32_t time);
 
+/* Battery report over raw HID (see docs/PROTOCOL.md). The report is
+ * RAW_EPSIZE bytes; only the following are meaningful, the rest are zero. */
 #define KB_BATTERY_CMD_GET 0xA4
+
+#define KB_BATTERY_IDX_CMD   0
+#define KB_BATTERY_IDX_LEVEL 1
+#define KB_BATTERY_IDX_CHARGE 4
+#define KB_BATTERY_IDX_TRANSPORT 5
+#define KB_BATTERY_IDX_MODEL 6
+
+/* KB_BATTERY_IDX_CHARGE */
+enum kb_battery_charge {
+    KB_BATTERY_CHARGE_DISCHARGING = 0,
+    KB_BATTERY_CHARGE_CHARGING,
+    KB_BATTERY_CHARGE_FULL,
+};
+
+/* KB_BATTERY_IDX_TRANSPORT */
+#define KB_BATTERY_TRANSPORT_USB 0x01
+#define KB_BATTERY_TRANSPORT_BT  0x02
+#define KB_BATTERY_TRANSPORT_2G4 0x04
 
 /* Identifies the keyboard model in the battery report (see PROTOCOL.md).
  * Override in the keyboard's config.h. */
@@ -46,7 +66,8 @@ void hs_rgb_blink_set_timer(uint32_t time);
 #endif
 
 uint8_t kb_battery_percent(void);
-uint8_t kb_charging_state(void);
-uint8_t kb_transport_byte(void);
+uint8_t kb_battery_charge(void);
+uint8_t kb_battery_transport(void);
+bool    kb_battery_changed(void);
 void    kb_battery_report_fill(uint8_t *buf);
 void    kb_battery_push_task(void);

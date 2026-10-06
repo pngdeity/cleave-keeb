@@ -1,5 +1,12 @@
 WIRELESS_ENABLE ?= yes
-WIRELESS_DIR = $(TOP_DIR)/keyboards/epomaker/epomaker_split65/wireless
+
+# The wireless stack is shared vendor code in keyboards/linker/wireless, the
+# same directory ~20 other boards include. Split65 keeps its own copy of only
+# the one file it actually changes (lpwr_wb32.c, the deep-sleep fix); every
+# other source comes from the shared directory so vendor fixes reach this board
+# and the divergence stays a one-file diff.
+WIRELESS_DIR = $(TOP_DIR)/keyboards/linker/wireless
+WIRELESS_LOCAL_DIR = $(TOP_DIR)/keyboards/epomaker/epomaker_split65/wireless
 
 ifeq ($(strip $(WIRELESS_ENABLE)), yes)
     OPT_DEFS += -DWIRELESS_ENABLE -DNO_USB_STARTUP_CHECK
@@ -9,7 +16,8 @@ ifeq ($(strip $(WIRELESS_ENABLE)), yes)
     UART_DRIVER_REQUIRED ?= yes
     WIRELESS_LPWR_STOP_ENABLE ?= yes
 
-    VPATH += $(WIRELESS_DIR)
+    # Local dir first: lpwr_wb32.c resolves here, not in the shared directory.
+    VPATH += $(WIRELESS_LOCAL_DIR) $(WIRELESS_DIR)
 
     SRC += \
         $(WIRELESS_DIR)/wireless.c \
@@ -21,6 +29,6 @@ ifeq ($(strip $(WIRELESS_ENABLE)), yes)
 
     ifeq ($(strip $(WIRELESS_LPWR_STOP_ENABLE)), yes)
         OPT_DEFS += -DWIRELESS_LPWR_STOP_ENABLE
-        SRC += $(WIRELESS_DIR)/lpwr_wb32.c
+        SRC += $(WIRELESS_LOCAL_DIR)/lpwr_wb32.c
     endif
 endif

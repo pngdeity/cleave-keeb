@@ -24,9 +24,15 @@ typedef union {
         uint8_t dir_flag : 1;
         uint8_t filp : 1;
         uint8_t last_wireless_devs : 3;
+        uint8_t version : 8;
     };
 } confinfo_t;
 confinfo_t confinfo;
+
+/* Bump when a field's meaning or position changes. An EEPROM block written by
+ * an older firmware then fails the check below and is re-defaulted once, which
+ * is deterministic where a per-field heuristic is not. */
+#define CONFINFO_VERSION 1
 
 typedef struct {
     bool active;
@@ -109,6 +115,7 @@ void eeconfig_confinfo_default(void) {
     confinfo.last_btdevs      = 1;
     confinfo.dir_flag         = 0;
     confinfo.last_wireless_devs = DEVS_BT1;
+    confinfo.version          = CONFINFO_VERSION;
 
     // #ifdef WIRELESS_ENABLE
     //     confinfo.devs = DEVS_USB;
@@ -141,15 +148,11 @@ void master_sync_mms_slave(uint8_t last_mode, uint8_t now_mode, uint8_t reset)
 void eeconfig_confinfo_init(void) {
 
     confinfo.raw = eeconfig_confinfo_read();
-    if (!confinfo.raw) {
+    /* A blank block, or one written by older firmware (different layout), is
+     * re-defaulted. The version gate makes the migration deterministic instead
+     * of guessing per field. */
+    if (!confinfo.raw || confinfo.version != CONFINFO_VERSION) {
         eeconfig_confinfo_default();
-    }
-    /* last_wireless_devs is a newer field: an EEPROM written by older firmware
-     * leaves it 0 (DEVS_USB), which is not a valid "last wireless device" to
-     * restore to. Reset it to a sane default. */
-    if (confinfo.last_wireless_devs > DEVS_2G4 || confinfo.last_wireless_devs == DEVS_USB) {
-        confinfo.last_wireless_devs = DEVS_BT1;
-        eeconfig_confinfo_update(confinfo.raw);
     }
 }
 

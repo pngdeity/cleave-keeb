@@ -4,8 +4,8 @@
 #include "wls.h"
 #include "usb_descriptor.h"
 
-static ioline_t col_pins[MATRIX_COLS] = MATRIX_COL_PINS;
-static ioline_t col_pins_r[MATRIX_COLS] = MATRIX_COL_PINS_RIGHT;
+static ioline_t col_pins_left[MATRIX_COLS]  = MATRIX_COL_PINS;
+static ioline_t col_pins_right[MATRIX_COLS] = MATRIX_COL_PINS_RIGHT;
 
 bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev) {
     static uint32_t scan_timer = 0x00;
@@ -144,21 +144,21 @@ void lpwr_exti_init_hook(void) {
     
     if (lower_sleep) {
 #if DIODE_DIRECTION == ROW2COL
-        for (uint8_t i = 0; i < ARRAY_SIZE(col_pins); i++) {
-            if (col_pins[i] != NO_PIN) {
-                setPinOutput(col_pins[i]);
-                writePinHigh(col_pins[i]);
+        /* Drive both halves' columns high so a keypress on either half pulls
+         * its row low and can wake the board. */
+        for (uint8_t i = 0; i < ARRAY_SIZE(col_pins_left); i++) {
+            if (col_pins_left[i] != NO_PIN) {
+                setPinOutput(col_pins_left[i]);
+                writePinHigh(col_pins_left[i]);
             }
         }
 
-    #if defined(MATRIX_ROW_PINS_RIGHT) && defined(MATRIX_COL_PINS_RIGHT)
-        for (uint8_t i = 0; i < ARRAY_SIZE(col_pins_r); i++) {
-            if (col_pins_r[i] != NO_PIN) {
-                setPinOutput(col_pins_r[i]);
-                writePinHigh(col_pins_r[i]);
+        for (uint8_t i = 0; i < ARRAY_SIZE(col_pins_right); i++) {
+            if (col_pins_right[i] != NO_PIN) {
+                setPinOutput(col_pins_right[i]);
+                writePinHigh(col_pins_right[i]);
             }
         }
-    #endif
 #endif
     }
     setPinInput(HS_BAT_CABLE_PIN);
@@ -220,31 +220,46 @@ uint8_t kb_battery_percent(void) {
     return bat > 100 ? 100 : bat;
 }
 
-uint8_t kb_charging_state(void) {
+uint8_t kb_battery_charge(void) {
     if (!charging_state) {
-        return 0;
+        return KB_BATTERY_CHARGE_DISCHARGING;
     }
-    return bat_full_flag ? 2 : 1;
+    return bat_full_flag ? KB_BATTERY_CHARGE_FULL : KB_BATTERY_CHARGE_CHARGING;
 }
 
-uint8_t kb_transport_byte(void) {
+uint8_t kb_battery_transport(void) {
     uint8_t devs = wireless_get_current_devs();
 
     if (devs == DEVS_USB) {
-        return 0x01;
+        return KB_BATTERY_TRANSPORT_USB;
     }
     if (devs == DEVS_2G4) {
-        return 0x04;
+        return KB_BATTERY_TRANSPORT_2G4;
     }
-    return 0x02;
+    return KB_BATTERY_TRANSPORT_BT;
+}
+
+bool kb_battery_changed(void) {
+    static uint8_t last_percent = 0xff, last_charge = 0xff, last_transport = 0xff;
+    uint8_t percent = kb_battery_percent();
+    uint8_t charge = kb_battery_charge();
+    uint8_t transport = kb_battery_transport();
+
+    if (percent == last_percent && charge == last_charge && transport == last_transport) {
+        return false;
+    }
+    last_percent = percent;
+    last_charge = charge;
+    last_transport = transport;
+    return true;
 }
 
 void kb_battery_report_fill(uint8_t *buf) {
-    /* memset zeroes bytes 2-3 (reserved) and 7-31 (padding). */
+    /* memset zeroes the reserved and padding bytes. */
     memset(buf, 0, RAW_EPSIZE);
-    buf[0] = KB_BATTERY_CMD_GET;
-    buf[1] = kb_battery_percent();
-    buf[4] = kb_charging_state();
-    buf[5] = kb_transport_byte();
-    buf[6] = KB_BATTERY_MODEL_ID;
+    buf[KB_BATTERY_IDX_CMD] = KB_BATTERY_CMD_GET;
+    buf[KB_BATTERY_IDX_LEVEL] = kb_battery_percent();
+    buf[KB_BATTERY_IDX_CHARGE] = kb_battery_charge();
+    buf[KB_BATTERY_IDX_TRANSPORT] = kb_battery_transport();
+    buf[KB_BATTERY_IDX_MODEL] = KB_BATTERY_MODEL_ID;
 }
