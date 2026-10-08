@@ -302,7 +302,17 @@ void suspend_power_down_user(void) {
 
 bool lpwr_is_allow_timeout_hook(void) {
 
-    if (wireless_get_current_devs() == DEVS_USB && is_keyboard_master()) {
+    /* The slave must never time itself out. Its EXTIs are not its own: the
+     * mode-switch pins are armed master-only in lpwr_exti_init_hook() and the
+     * column drive that would let a keypress wake it is gated on lower_sleep.
+     * A slave that stops on its own timeout therefore has no way back. Let the
+     * master drive sleep for both halves via the 0xAA RPC instead, which sets
+     * lower_sleep first so the wake sources are armed. */
+    if (!is_keyboard_master()) {
+        return false;
+    }
+
+    if (wireless_get_current_devs() == DEVS_USB) {
         return false;
     }
 
