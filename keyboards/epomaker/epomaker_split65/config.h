@@ -86,6 +86,10 @@
 
 #define SPLIT_TRANSACTION_IDS_USER USER_SYNC_MMS    //multimode status
 
+/* Let a slave that has genuinely lost the link reset and re-sync instead of
+ * churning forever. Upstream mechanism (quantum/split_common). */
+#define SPLIT_WATCHDOG_ENABLE
+
 /* Encoder */
 #define ENCODER_MAP_KEY_DELAY               1
 

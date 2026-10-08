@@ -263,6 +263,14 @@ void suspend_wakeup_init_kb(void) {
 
 void suspend_wakeup_init_user(void) {
     usart_init();
+
+    /* The 0xCC/0xBB pair relay LED-rail power to the slave, so they only make
+     * sense on battery. While cabled the rail must stay up on both halves;
+     * broadcasting it would extinguish the slave's backlight. */
+    if (wireless_get_current_devs() == DEVS_USB) {
+        return;
+    }
+
     master_to_slave_t m2s = {0};
     slave_to_master_t s2m = {0};
     m2s.cmd               = 0xCC;
@@ -275,6 +283,10 @@ void suspend_wakeup_init_user(void) {
 }
 
 void suspend_power_down_user(void) {
+
+    if (wireless_get_current_devs() == DEVS_USB) {
+        return;
+    }
 
     master_to_slave_t m2s = {0};
     slave_to_master_t s2m = {0};
