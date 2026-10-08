@@ -19,7 +19,9 @@
 #endif
 
 #ifndef MD_SEND_PKT_PAYLOAD_MAX
-#    define MD_SEND_PKT_PAYLOAD_MAX ((MD_RAW_SIZE) + 4)
+/* Must fit the largest frame any sender pushes: the longest is the
+ * manufacturer/product name frame at MD_SND_CMD_MANUFACTURER_LEN + 3. */
+#    define MD_SEND_PKT_PAYLOAD_MAX ((MD_SND_CMD_MANUFACTURER_LEN) + 3)
 #endif
 
 #ifndef MD_BT1_NAME
@@ -161,12 +163,22 @@ static void md_receive_msg_task(void) {
 
                 // raw data
                 if ((md_rev_payload[0] == MD_REV_CMD_RAW) && (md_rev_payload[1] == MD_REV_CMD_RAW_OUT)) {
+                    if (data > (MD_SEND_PKT_PAYLOAD_MAX - 3)) {
+                        data_count  = 0;
+                        data_remain = 0;
+                        continue;
+                    }
                     md_rev_payload[data_count++] = data;
                     data_remain                  = data + 1;
                     continue;
                 }
             }
             default: {
+                if (data_count >= sizeof(md_rev_payload)) {
+                    data_count  = 0;
+                    data_remain = 0;
+                    continue;
+                }
                 md_rev_payload[data_count++] = data;
                 data_remain--;
 
@@ -380,7 +392,7 @@ void md_send_devinfo(const char *name) {
 
     memcpy(&sdata[2], name, infolen);
     md_calc_check_sum(sdata, infolen + 2);
-    smsg_push(sdata, sizeof(sdata));
+    smsg_push(sdata, infolen + 3);
 }
 
 void md_send_devctrl(uint8_t cmd) {
@@ -424,7 +436,7 @@ void md_send_vpid(uint16_t vid, uint16_t pid) {
     uint8_t sdata[4 + 2] = {0x00};
     uint32_t vpid;
 
-    vpid = (pid << 16) | vid;
+    vpid = ((uint32_t)pid << 16) | (uint32_t)vid;
 
     sdata[0] = MD_SND_CMD_VPID;
     memcpy(&sdata[1], &vpid, sizeof(vpid));

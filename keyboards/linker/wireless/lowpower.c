@@ -25,7 +25,7 @@ static lpwr_state_t lpwr_state       = LPWR_NORMAL;
 static lpwr_mode_t lpwr_mode         = LPWR_MODE_TIMEOUT;
 static uint32_t lpwr_timeout_value   = LPWR_TIMEOUT;
 static uint32_t lpwr_timestamp       = 0x00;
-static lpwr_wakeupcd_t lpwr_wakeupcd = LPWR_WAKEUP_NONE;
+static volatile lpwr_wakeupcd_t lpwr_wakeupcd = LPWR_WAKEUP_NONE;
 static bool manual_timeout           = false;
 
 static bool rgb_enable_bak = false;

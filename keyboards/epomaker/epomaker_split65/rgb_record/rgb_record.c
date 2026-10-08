@@ -41,7 +41,6 @@ static rgbrec_info_t rgbrec_info = {
     .value   = 0xFF,
 };
 
-static uint8_t rgbrec_buffer[MATRIX_ROWS * MATRIX_COLS * 2];
 extern const uint16_t PROGMEM rgbrec_default_effects[RGBREC_CHANNEL_NUM][MATRIX_ROWS][MATRIX_COLS];
 
 static bool find_matrix_row_col(uint8_t index, uint8_t *row, uint8_t *col) {
@@ -178,8 +177,8 @@ void rgbrec_set_close_all(uint8_t h, uint8_t s, uint8_t v) {
     } else {
         for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
             for (uint8_t col = 0; col < MATRIX_COLS; col++) {
-                rgbrec_buffer[row * MATRIX_COLS * col * 2]       = s;
-                rgbrec_buffer[(row * MATRIX_COLS * col * 2) + 1] = v;
+                rgbrec_buffer[((row * MATRIX_COLS) + col) * 2]     = s;
+                rgbrec_buffer[(((row * MATRIX_COLS) + col) * 2) + 1] = v;
             }
         }
     }
