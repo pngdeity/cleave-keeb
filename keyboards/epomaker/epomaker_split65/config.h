@@ -68,7 +68,10 @@
 #define SD1_RX_PIN                          C11
 
 /* The current ChibiOS uart_serial driver reads UART_* directly; the old
- * SD1_* -> UART_* alias layer was removed upstream. */
+ * SERIAL_DRIVER -> UART_DRIVER and SD1_* -> UART_* alias layer was removed
+ * upstream. Without UART_DRIVER the module UART would default to SD1, which
+ * collides with the split link below (also SD1). Keep it on SD3 (UART3). */
+#define UART_DRIVER                         SD3
 #define UART_TX_PIN                         C10
 #define UART_RX_PIN                         C11
 #define UART_TX_PAL_MODE                    7
@@ -86,9 +89,13 @@
 
 #define SPLIT_TRANSACTION_IDS_USER USER_SYNC_MMS    //multimode status
 
-/* Let a slave that has genuinely lost the link reset and re-sync instead of
- * churning forever. Upstream mechanism (quantum/split_common). */
-#define SPLIT_WATCHDOG_ENABLE
+/* SPLIT_WATCHDOG_ENABLE is deliberately NOT defined. Upstream's watchdog
+ * reboots a slave via mcu_reset() after SPLIT_WATCHDOG_TIMEOUT on a missed
+ * master ping, but its slave-side "done" flag is refreshed only by a
+ * one-way ping the master emits while the master's own flag is clear, so on
+ * this board the slave could never re-arm and reset-looped (~3 s), killing
+ * the backlight. The vendor firmware never enabled it. Not needed for any
+ * functional requirement; leave off. */
 
 /* Encoder */
 #define ENCODER_MAP_KEY_DELAY               1
