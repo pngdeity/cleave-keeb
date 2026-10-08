@@ -4,6 +4,7 @@
 #include "rgb_record.h"
 #include "rgb_matrix.h"
 #include "eeprom.h"
+#include "nvm/eeprom/nvm_eeprom_eeconfig_internal.h"
 
 #define RGBREC_STATE_ON  1
 #define RGBREC_STATE_OFF 0

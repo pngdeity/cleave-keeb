@@ -128,7 +128,7 @@ void lpwr_exti_init_hook(void) {
 
 #ifdef HS_BT_DEF_PIN
     if (is_keyboard_master()) {
-        setPinInputHigh(HS_BT_DEF_PIN);
+        gpio_set_pin_input_high(HS_BT_DEF_PIN);
         waitInputPinDelay();
         palEnableLineEvent(HS_BT_DEF_PIN, PAL_EVENT_MODE_BOTH_EDGES);
     }
@@ -136,7 +136,7 @@ void lpwr_exti_init_hook(void) {
 
 #ifdef HS_2G4_DEF_PIN
     if (is_keyboard_master()) {
-        setPinInputHigh(HS_2G4_DEF_PIN);
+        gpio_set_pin_input_high(HS_2G4_DEF_PIN);
         waitInputPinDelay();
         palEnableLineEvent(HS_2G4_DEF_PIN, PAL_EVENT_MODE_BOTH_EDGES);
     }
@@ -148,20 +148,20 @@ void lpwr_exti_init_hook(void) {
          * its row low and can wake the board. */
         for (uint8_t i = 0; i < ARRAY_SIZE(col_pins_left); i++) {
             if (col_pins_left[i] != NO_PIN) {
-                setPinOutput(col_pins_left[i]);
-                writePinHigh(col_pins_left[i]);
+                gpio_set_pin_output(col_pins_left[i]);
+                gpio_write_pin_high(col_pins_left[i]);
             }
         }
 
         for (uint8_t i = 0; i < ARRAY_SIZE(col_pins_right); i++) {
             if (col_pins_right[i] != NO_PIN) {
-                setPinOutput(col_pins_right[i]);
-                writePinHigh(col_pins_right[i]);
+                gpio_set_pin_output(col_pins_right[i]);
+                gpio_write_pin_high(col_pins_right[i]);
             }
         }
 #endif
     }
-    setPinInput(HS_BAT_CABLE_PIN);
+    gpio_set_pin_input(HS_BAT_CABLE_PIN);
     waitInputPinDelay();
     palEnableLineEvent(HS_BAT_CABLE_PIN, PAL_EVENT_MODE_RISING_EDGE);
 }

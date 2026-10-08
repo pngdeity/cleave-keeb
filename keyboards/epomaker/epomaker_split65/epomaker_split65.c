@@ -175,11 +175,11 @@ void keyboard_post_init_kb(void) {
 #endif
 
 #ifdef HS_BT_DEF_PIN
-    setPinInputHigh(HS_BT_DEF_PIN);
+    gpio_set_pin_input_high(HS_BT_DEF_PIN);
 #endif
 
 #ifdef HS_2G4_DEF_PIN
-    setPinInputHigh(HS_2G4_DEF_PIN);
+    gpio_set_pin_input_high(HS_2G4_DEF_PIN);
 #endif
 
 #ifdef USB_POWER_EN_PIN
@@ -188,11 +188,11 @@ void keyboard_post_init_kb(void) {
 #endif
 
 #ifdef HS_BAT_CABLE_PIN
-    setPinInput(HS_BAT_CABLE_PIN);
+    gpio_set_pin_input(HS_BAT_CABLE_PIN);
 #endif
 
 #ifdef BAT_FULL_PIN
-    setPinInputHigh(BAT_FULL_PIN);
+    gpio_set_pin_input_high(BAT_FULL_PIN);
 #endif
 
 
@@ -480,7 +480,7 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
             break;
         }
         
-        case RGB_MOD:
+        case QK_RGB_MATRIX_MODE_NEXT:
             break;
         default: {
             if (rgbrec_is_started()) {
@@ -1105,21 +1105,21 @@ bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
 
             return false;
         } break;
-        case RGB_SPI: {
+        case QK_RGB_MATRIX_SPEED_UP: {
             if (record->event.pressed) {
                 if (rgb_matrix_get_speed() >= 215) {
                     rgb_blink_dir();
                 }
             }
         } break;
-        case RGB_SPD: {
+        case QK_RGB_MATRIX_SPEED_DOWN: {
             if (record->event.pressed) {
                 if (rgb_matrix_get_speed() <= 95) {
                     rgb_blink_dir();
                 }
             }
         } break;
-        case RGB_VAI: {
+        case QK_RGB_MATRIX_VALUE_UP: {
             if (record->event.pressed) {
                 rgb_matrix_enable();
                 gpio_write_pin_high(LED_POWER_EN_PIN);
@@ -1129,7 +1129,7 @@ bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
                 }
             }
         } break;
-        case RGB_VAD: {
+        case QK_RGB_MATRIX_VALUE_DOWN: {
             if (record->event.pressed) {
                 if (rgb_matrix_get_val() <= RGB_MATRIX_VAL_STEP) {
                     gpio_write_pin_low(LED_POWER_EN_PIN);
@@ -1169,7 +1169,7 @@ bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
             return false;
         } break;
     
-        case RGB_MOD: {
+        case QK_RGB_MATRIX_MODE_NEXT: {
             if(record->event.pressed){
                 uint8_t mode = rgb_matrix_get_mode();
                 if(mode == 29){
@@ -1260,9 +1260,9 @@ void housekeeping_task_user(void) { // loop
     static uint32_t hs_current_time;
     static bool prev_cable_state = false;
 
-    charging_state = readPin(HS_BAT_CABLE_PIN);
+    charging_state = gpio_read_pin(HS_BAT_CABLE_PIN);
 
-    bat_full_flag = readPin(BAT_FULL_PIN);
+    bat_full_flag = gpio_read_pin(BAT_FULL_PIN);
 
     hs_transport_arbitrate_cable(charging_state, prev_cable_state);
     prev_cable_state = charging_state;
@@ -1680,11 +1680,11 @@ void hs_reset_settings(void) {
     rgblight_enable();
 #endif
 
-    keymap_config.raw = eeconfig_read_keymap();
+    eeconfig_read_keymap(&keymap_config);
 
 #if defined(NKRO_ENABLE) && defined(FORCE_NKRO)
     keymap_config.nkro = 0;
-    eeconfig_update_keymap(keymap_config.raw);
+    eeconfig_update_keymap(&keymap_config);
 #endif
 
     // #if defined(WIRELESS_ENABLE)
@@ -1705,7 +1705,7 @@ void lpwr_wakeup_hook(void) {
     /* If the board woke up with the USB cable attached, switch onto USB and
      * remember the wireless transport it came from. Shared with
      * housekeeping_task_user so the policy has one home. */
-    hs_transport_arbitrate_cable(readPin(HS_BAT_CABLE_PIN), false);
+    hs_transport_arbitrate_cable(gpio_read_pin(HS_BAT_CABLE_PIN), false);
 
     if (rgb_matrix_get_val() != 0){
         gpio_write_pin_high(LED_POWER_EN_PIN);

@@ -25,10 +25,10 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 
     [_FL] = LAYOUT( /* Base */
         KC_GRV,   KC_F1,    KC_F2,    KC_F3,    KC_F4,    KC_F5,              KC_F6,    KC_F7,    KC_F8,    KC_F9,     KC_F10,   KC_F11,  KC_F12,   EE_CLR,   _______,
-        RGB_MOD,  KC_BT1,   KC_BT2,   KC_BT3,   KC_2G4,   _______,            _______,  _______,  _______, _______,    _______,  RGB_HUD, RGB_HUI,  _______,  KC_INS,  
-        _______,  KC_A,     TO(_MBL), _______,  _______,  _______,            _______,  _______,  _______, _______,    RGB_SAD,  RGB_SAI, _______,            KC_HOME, 
-        _______,  _______,  RGB_TOG,  _______,  _______,  _______,            NK_TOGG,  _______,  _______, _______,    _______,           _______,  RGB_VAI,  KC_END,
-        KC_FILP,  GU_TOGG,  _______,  KC_BATQ,                                KC_BATQ,  _______,  _______, _______,                       RGB_SPD,  RGB_VAD,  RGB_SPI),
+        RM_NEXT,  KC_BT1,   KC_BT2,   KC_BT3,   KC_2G4,   _______,            _______,  _______,  _______, _______,    _______,  RM_HUED, RM_HUEU,  _______,  KC_INS,  
+        _______,  KC_A,     TO(_MBL), _______,  _______,  _______,            _______,  _______,  _______, _______,    RM_SATD,  RM_SATU, _______,            KC_HOME, 
+        _______,  _______,  RM_TOGG,  _______,  _______,  _______,            NK_TOGG,  _______,  _______, _______,    _______,           _______,  RM_VALU,  KC_END,
+        KC_FILP,  GU_TOGG,  _______,  KC_BATQ,                                KC_BATQ,  _______,  _______, _______,                       RM_SPDD,  RM_VALD,  RM_SPDU),
 
     [_MBL] = LAYOUT( /* Base */
         KC_ESC,   KC_1,     KC_2,     KC_3,     KC_4,     KC_5,               KC_6,     KC_7,     KC_8,     KC_9,     KC_0,     KC_MINS,  KC_EQL,   KC_BSPC, KC_MUTE,
@@ -38,10 +38,10 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
         KC_LCTL,  KC_LALT,  KC_LGUI,  KC_SPC,                                 KC_SPC,   KC_RGUI,  MO(_MFL), KC_RCTL,                      KC_LEFT,  KC_DOWN, KC_RGHT),
     [_MFL] = LAYOUT( /* Base */
         KC_GRV,   KC_F1,    KC_F2,    KC_F3,    KC_F4,    KC_F5,              KC_F6,    KC_F7,    KC_F8,    KC_F9,     KC_F10,   KC_F11,  KC_F12,   EE_CLR,   _______,
-        RGB_MOD,  KC_BT1,   KC_BT2,   KC_BT3,   KC_2G4,   _______,            _______,  _______,  _______, _______,    _______,  RGB_HUD, RGB_HUI,  _______,  KC_INS,  
-        _______,  TO(_BL),  KC_S,     _______,  _______,  _______,            _______,  _______,  _______, _______,    RGB_SAD,  RGB_SAI, _______,            KC_HOME, 
-        _______,  _______,  RGB_TOG,  _______,  _______,  _______,            NK_TOGG,  _______,  _______, _______,    _______,           _______,  RGB_VAI,  KC_END,
-        KC_FILP,  _______,  _______,  KC_BATQ,                                KC_BATQ,  _______,  _______, _______,                       RGB_SPD,  RGB_VAD,  RGB_SPI),
+        RM_NEXT,  KC_BT1,   KC_BT2,   KC_BT3,   KC_2G4,   _______,            _______,  _______,  _______, _______,    _______,  RM_HUED, RM_HUEU,  _______,  KC_INS,  
+        _______,  TO(_BL),  KC_S,     _______,  _______,  _______,            _______,  _______,  _______, _______,    RM_SATD,  RM_SATU, _______,            KC_HOME, 
+        _______,  _______,  RM_TOGG,  _______,  _______,  _______,            NK_TOGG,  _______,  _______, _______,    _______,           _______,  RM_VALU,  KC_END,
+        KC_FILP,  _______,  _______,  KC_BATQ,                                KC_BATQ,  _______,  _______, _______,                       RM_SPDD,  RM_VALD,  RM_SPDU),
 
 };
 
@@ -57,8 +57,8 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
 // clang-format on
 
 bool is_keyboard_master(void) {
-    setPinInput(SPLIT_HAND_PIN);
-    return readPin(SPLIT_HAND_PIN);
+    gpio_set_pin_input(SPLIT_HAND_PIN);
+    return gpio_read_pin(SPLIT_HAND_PIN);
 }
 
 /* Force a solid white at half brightness instead of the vendor's rainbow wave.

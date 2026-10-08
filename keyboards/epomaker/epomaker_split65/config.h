@@ -66,6 +66,13 @@
 #define SD1_TX_PIN                          C10
 #define SD1_RX_PIN                          C11
 
+/* The current ChibiOS uart_serial driver reads UART_* directly; the old
+ * SD1_* -> UART_* alias layer was removed upstream. */
+#define UART_TX_PIN                         C10
+#define UART_RX_PIN                         C11
+#define UART_TX_PAL_MODE                    7
+#define UART_RX_PAL_MODE                    7
+
 #define SERIAL_USART_DRIVER SD1
 #define SERIAL_USART_TX_PIN A9
 #define SERIAL_USART_RX_PIN A10
