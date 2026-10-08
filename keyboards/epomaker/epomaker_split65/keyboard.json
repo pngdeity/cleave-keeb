@@ -19,7 +19,9 @@
         }
     },
     "features": {
+        "battery": true,
         "command": false,
+        "connection": true,
         "console": false,
         "deferred_exec": true,
         "encoder": true,

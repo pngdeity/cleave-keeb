@@ -5,6 +5,7 @@
 #include "wls/wls.h"
 #include "rgb_record/rgb_record.h"
 #include "quantum.h"
+#include "connection.h"
 #include "serial_usart.h"
 #ifdef WIRELESS_ENABLE
 #    include "wireless.h"
@@ -402,8 +403,12 @@ bool process_record_wls(uint16_t keycode, keyrecord_t *record) {
 #    define WLS_KEYCODE_EXEC(wls_dev)                                                                                          \
         do {                                                                                                                   \
             if (record->event.pressed) {                                                                                       \
-                if (wireless_get_current_devs() != wls_dev)                                                                    \
-                    wireless_devs_change(wireless_get_current_devs(), wls_dev, false);                                         \
+                /* Route through upstream's connection subsystem so it owns the                                              \
+                 * persisted host choice; connection_host_changed_kb() then                                                    \
+                 * maps it onto the vendor device index and transport. */                                                      \
+                connection_host_t wls_host = (wls_dev) == DEVS_USB ? CONNECTION_HOST_USB :                                     \
+                                             (wls_dev) == DEVS_2G4 ? CONNECTION_HOST_2P4GHZ : CONNECTION_HOST_BLUETOOTH;       \
+                connection_set_host(wls_host);                                                                                 \
                 if (wls_process_long_press_token == INVALID_DEFERRED_TOKEN) {                                                  \
                     wls_process_long_press_token = defer_exec(WLS_KEYCODE_PAIR_TIME, wls_process_long_press, &keycode_shadow); \
                 }                                                                                                              \
@@ -1367,6 +1372,35 @@ void wireless_devs_change_kb(uint8_t old_devs, uint8_t new_devs, bool reset) {
         } break;
         default:
             break;
+    }
+}
+
+/* Upstream's connection subsystem (quantum/connection) is a user-facing
+ * selector and EEPROM store; it does not drive transport. This board's
+ * `wireless_devs_change()` remains the transport authority, so the hook maps
+ * upstream's host choice onto the vendor device index. The BT profile is not
+ * expressed by upstream's enum, so a BLUETOOTH request keeps the board's last
+ * BT profile (confinfo.last_btdevs) rather than resetting it to profile 1. */
+void connection_host_changed_kb(connection_host_t host) {
+    uint8_t target;
+    switch (host) {
+        case CONNECTION_HOST_USB:
+            target = DEVS_USB;
+            break;
+        case CONNECTION_HOST_2P4GHZ:
+            target = DEVS_2G4;
+            break;
+        case CONNECTION_HOST_BLUETOOTH:
+            target = (confinfo.last_btdevs >= DEVS_BT1 && confinfo.last_btdevs <= DEVS_BT5) ? confinfo.last_btdevs : DEVS_BT1;
+            break;
+        default:
+            /* CONNECTION_HOST_AUTO is resolved by upstream before this hook;
+             * NONE has no wireless equivalent here. */
+            return;
+    }
+
+    if (wireless_get_current_devs() != target) {
+        wireless_devs_change(wireless_get_current_devs(), target, false);
     }
 }
 

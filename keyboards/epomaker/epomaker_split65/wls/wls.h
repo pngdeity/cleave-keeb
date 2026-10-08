@@ -6,6 +6,7 @@
 #include QMK_KEYBOARD_H
 
 #include "quantum.h"
+#include "battery.h"
 #include <stdbool.h>
 #include "wireless.h"
 
@@ -66,7 +67,6 @@ enum kb_battery_charge {
 #    define KB_BATTERY_MODEL_ID 0
 #endif
 
-uint8_t kb_battery_percent(void);
 uint8_t kb_battery_charge(void);
 uint8_t kb_battery_transport(void);
 

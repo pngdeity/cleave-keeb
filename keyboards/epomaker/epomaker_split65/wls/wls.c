@@ -215,10 +215,9 @@ void lpwr_stop_hook_post(void) {
     }
 }
 
-uint8_t kb_battery_percent(void) {
-    uint8_t bat = *md_getp_bat();
-    return bat > 100 ? 100 : bat;
-}
+/* The percentage itself is owned upstream: `battery_driver_sample_percent()`
+ * (wls_battery_driver.c) feeds quantum/battery's cached `battery_get_percent()`
+ * (see `kb_battery_snapshot()` below). */
 
 uint8_t kb_battery_charge(void) {
     if (!charging_state) {
@@ -253,8 +252,10 @@ bool kb_battery_changed(const kb_battery_snapshot_t *snap) {
 
 void kb_battery_snapshot(kb_battery_snapshot_t *out) {
     /* Sample live sources exactly once, then derive every field from that
-     * single sample so callers cannot observe a torn state. */
+     * single sample so callers cannot observe a torn state. The level comes
+     * from upstream's cached `battery_get_percent()` so the whole firmware
+     * reports one consistent value. */
     out->transport = kb_battery_transport();
-    out->percent   = kb_battery_percent();
+    out->percent   = battery_get_percent();
     out->charge    = kb_battery_charge();
 }
