@@ -1225,38 +1225,25 @@ bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
     return true;
 }
 
-/* Single arbiter for cable-driven transport changes.
+/* Cable-driven transport arbitration — DISABLED (requirement 2).
  *
- * Every path that reacts to the USB cable must go through here so the
- * "switch to USB on insert, restore the remembered wireless transport on
- * remove" policy lives in exactly one place. Callers previously mutated
- * confinfo.last_wireless_devs and wireless_devs_change() independently
- * (housekeeping and lpwr_wakeup_hook), which could interleave. Master only:
- * wireless_devs_change() is not master-gated and the slave does not own the
- * transport.
+ * Historically this was the single owner of the "switch to USB on cable
+ * insert, restore the remembered wireless transport on remove" policy. That
+ * policy defeats functional requirement 2: the operator charges from an
+ * external PSU while using the keyboard wirelessly, so "a cable is present"
+ * must NOT by itself mean "switch to USB".
  *
- * cable_present is the freshly sampled HS_BAT_CABLE_PIN level; prev_present is
- * the caller's last known level (false at first call so an already-inserted
- * cable is treated as an insert). Returns true if a transport change was
- * issued. */
+ * Mode selection now belongs solely to the physical mode switch, whose
+ * detection loop (hs_modeio_detection(), wls/wls.c) already calls
+ * wireless_devs_change() when the switch position changes. The function is
+ * kept as a no-op so its callers (housekeeping_task_user, lpwr_wakeup_hook)
+ * and the CI coupling guard stay valid; it deliberately no longer mutates
+ * confinfo.last_wireless_devs or the current device.
+ *
+ * Returns false always: no transport change is ever issued from the cable. */
 bool hs_transport_arbitrate_cable(bool cable_present, bool prev_present) {
-    if (!is_keyboard_master()) {
-        return false;
-    }
-
-    if (cable_present && !prev_present) {
-        uint8_t current_devs = wireless_get_current_devs();
-        if (current_devs != DEVS_USB) {
-            confinfo.last_wireless_devs = current_devs;
-            wireless_devs_change(current_devs, DEVS_USB, false);
-            return true;
-        }
-    } else if (!cable_present && prev_present) {
-        if (confinfo.last_wireless_devs != DEVS_USB) {
-            wireless_devs_change(DEVS_USB, confinfo.last_wireless_devs, false);
-            return true;
-        }
-    }
+    (void)cable_present;
+    (void)prev_present;
     return false;
 }
 
@@ -1491,21 +1478,27 @@ void bat_indicators(void) {
         return;
     }
 
-    /* Always-on soft battery indicator at HS_MATRIX_BAT_SOFT_INDEX. */
+    /* Always-on soft battery indicator across HS_MATRIX_BAT_SOFT_INDEX and
+     * HS_MATRIX_BAT_SOFT_INDEX2 (two adjacent right-half bottom-row LEDs), at
+     * full channel intensity so the charge state is legible at a glance rather
+     * than a single dim LED. */
     if (rgb_matrix_get_val() != 0) {
+        uint8_t r, g, b;
         if (charging_state && (bat_full_flag)) {
-            rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX, 0x00, 0x06, 0x00);
+            r = 0x00; g = 0xFF; b = 0x00;
         } else if (charging_state) {
-            rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX, 0x04, 0x00, 0x10);
+            r = 0x00; g = 0x40; b = 0xFF;
         } else if (bat_level >= 50) {
-            rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX, 0x00, 0x10, 0x00);
+            r = 0x00; g = 0xFF; b = 0x00;
         } else if (bat_level >= 30) {
-            rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX, 0x10, 0x0A, 0x00);
+            r = 0xFF; g = 0x80; b = 0x00;
         } else if (bat_level > BATTERY_CAPACITY_LOW) {
-            rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX, 0x10, 0x00, 0x00);
+            r = 0xFF; g = 0x00; b = 0x00;
         } else {
-            rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX, 0x30, 0x00, 0x00);
+            r = 0xFF; g = 0x00; b = 0x00;
         }
+        rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX, r, g, b);
+        rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX2, r, g, b);
     }
 
     if (charging_state && (bat_full_flag)) {

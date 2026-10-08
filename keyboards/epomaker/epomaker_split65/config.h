@@ -55,6 +55,7 @@
 /* Status Indicator Lamp */
 #define HS_MATRIX_BLINK_INDEX_BAT           63
 #define HS_MATRIX_BAT_SOFT_INDEX            64
+#define HS_MATRIX_BAT_SOFT_INDEX2           65
 #define HS_RGB_INDEX_CAPS                   2
 #define HS_RGB_INDEX_WIN_LOCK               1
 
