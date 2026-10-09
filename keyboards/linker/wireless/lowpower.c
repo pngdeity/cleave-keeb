@@ -4,6 +4,7 @@
 #include "quantum.h"
 #include "wireless.h"
 #include "usb_main.h"
+#include "lowpower_logic.h"
 
 #ifndef LPWR_TIMEOUT
 #    define LPWR_TIMEOUT 300000 // 5min
@@ -280,7 +281,7 @@ void lpwr_stop_cb(void) {
      * stopped", not as a wake. Discarding it here (rather than routing it back
      * to LPWR_STOP and hoping) is what keeps lpwr_wakeup_cb() from being
      * skipped, which is what left the half dark and unresponsive. */
-    if (lpwr_get_sleep_wakeupcd() & lpwr_wakeup_armed_mask()) {
+    if (lpwr_wakeup_is_real(lpwr_get_sleep_wakeupcd(), lpwr_wakeup_armed_mask())) {
         lpwr_set_state(LPWR_WAKEUP);
     } else {
         lpwr_set_state(LPWR_STOP);

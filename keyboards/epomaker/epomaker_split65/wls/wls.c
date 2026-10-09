@@ -3,6 +3,7 @@
 
 #include "wls.h"
 #include "usb_descriptor.h"
+#include "lowpower_logic.h"
 
 static ioline_t col_pins_left[MATRIX_COLS]  = MATRIX_COL_PINS;
 static ioline_t col_pins_right[MATRIX_COLS] = MATRIX_COL_PINS_RIGHT;
@@ -213,7 +214,7 @@ bool lpwr_stop_is_allowed(void) {
      * paths the master arms its own rows, the mode-switch pins and the cable
      * pin. What lower_sleep actually gates is the cross-half column drive, the
      * module-sleep command, and the post-stop wake interpretation. */
-    return is_keyboard_master() && lower_sleep;
+    return lpwr_stop_is_allowed_decide(is_keyboard_master(), lower_sleep);
 }
 
 uint32_t lpwr_wakeup_armed_mask(void) {
