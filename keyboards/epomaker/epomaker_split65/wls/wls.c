@@ -216,20 +216,26 @@ bool lpwr_stop_is_allowed(void) {
     return is_keyboard_master() && lower_sleep;
 }
 
+uint32_t lpwr_wakeup_armed_mask(void) {
+
+    /* The codes this board actually arms, and only those. UART is deliberately
+     * absent: this board's lpwr_exti_init() never arms UART_RX_PIN (the
+     * module's own traffic would defeat deep sleep), yet the WB32 EXTI reports
+     * by pad number alone, so the module UART RX pad is aliased to a matrix
+     * column and a column edge arrives here stamped LPWR_WAKEUP_UART. Naming
+     * UART armed would let that phantom be acted on as a real wake. */
+    return LPWR_WAKEUP_MATRIX | LPWR_WAKEUP_CABLE | LPWR_WAKEUP_SWITCH | LPWR_WAKEUP_USB;
+}
+
 void lpwr_stop_hook_post(void) {
-    if (lower_sleep) {
-        switch (lpwr_get_sleep_wakeupcd()) {
-            case LPWR_WAKEUP_USB:
-            case LPWR_WAKEUP_CABLE:
-            case LPWR_WAKEUP_SWITCH:
-            case LPWR_WAKEUP_MATRIX: {
-                lower_sleep = false;
-                lpwr_set_state(LPWR_WAKEUP);
-            } break;
-            default: {
-                lpwr_set_state(LPWR_STOP);
-            } break;
-        }
+
+    /* The state transition itself is now owned by lpwr_stop_cb(), which
+     * interprets the wake as a set against lpwr_wakeup_armed_mask(). All this
+     * hook needs to do is drop the board's ordered-sleep flag on a real wake,
+     * so the next stop starts unordered. The switch that used to live here
+     * predates the wake set and would misread a multi-bit code. */
+    if (lower_sleep && lpwr_get_state() == LPWR_WAKEUP) {
+        lower_sleep = false;
     }
 }
 

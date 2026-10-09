@@ -25,7 +25,12 @@ static lpwr_state_t lpwr_state       = LPWR_NORMAL;
 static lpwr_mode_t lpwr_mode         = LPWR_MODE_TIMEOUT;
 static uint32_t lpwr_timeout_value   = LPWR_TIMEOUT;
 static uint32_t lpwr_timestamp       = 0x00;
-static volatile lpwr_wakeupcd_t lpwr_wakeupcd = LPWR_WAKEUP_NONE;
+
+/* Stored as uint32_t, not lpwr_wakeupcd_t: the wake codes are a *set* and are
+ * compared against lpwr_wakeup_armed_mask(), which is 32-bit. Keeping the
+ * set-wide storage prevents any future flag from being silently truncated at
+ * the storage boundary. */
+static volatile uint32_t lpwr_wakeupcd = LPWR_WAKEUP_NONE;
 static bool manual_timeout           = false;
 
 static bool rgb_enable_bak = false;
@@ -72,10 +77,13 @@ uint32_t lpwr_timestamp_read(void) {
 }
 
 void lpwr_set_sleep_wakeupcd(lpwr_wakeupcd_t wakeupcd) {
-    lpwr_wakeupcd = wakeupcd;
+    /* Accumulate: a stop window may see several sources fire, and every one
+     * must survive to be interpreted. Writing would let a later phantom
+     * overwrite an earlier real wake. */
+    lpwr_wakeupcd |= wakeupcd;
 }
 
-lpwr_wakeupcd_t lpwr_get_sleep_wakeupcd(void) {
+uint32_t lpwr_get_sleep_wakeupcd(void) {
     return lpwr_wakeupcd;
 }
 
@@ -240,6 +248,14 @@ bool lpwr_stop_is_allowed(void) {
     return true;
 }
 
+uint32_t lpwr_wakeup_armed_mask(void) __attribute__((weak));
+uint32_t lpwr_wakeup_armed_mask(void) {
+    /* Default: this board arms every wake source, so any reported code is a
+     * real wake. A board whose EXTI channels alias unrelated pads overrides
+     * this to name only the codes it actually arms. */
+    return (uint32_t)-1;
+}
+
 void lpwr_stop_cb(void) __attribute__((weak));
 void lpwr_stop_cb(void) {
 
@@ -257,13 +273,17 @@ void lpwr_stop_cb(void) {
     lpwr_stop_hook_pre();
     lpwr_enter_stop();
 
-    switch (lpwr_get_sleep_wakeupcd()) {
-        case LPWR_WAKEUP_UART: {
-            lpwr_set_state(LPWR_STOP);
-        } break;
-        default: {
-            lpwr_set_state(LPWR_WAKEUP);
-        } break;
+    /* Interpret the wake as a set: the stop is only escaped when at least one
+     * code that fired belongs to the set this board actually arms. A code the
+     * board never arms is a phantom — on the WB32 EXTI a pad aliased to another
+     * function reports the wrong source — and must be treated as "still
+     * stopped", not as a wake. Discarding it here (rather than routing it back
+     * to LPWR_STOP and hoping) is what keeps lpwr_wakeup_cb() from being
+     * skipped, which is what left the half dark and unresponsive. */
+    if (lpwr_get_sleep_wakeupcd() & lpwr_wakeup_armed_mask()) {
+        lpwr_set_state(LPWR_WAKEUP);
+    } else {
+        lpwr_set_state(LPWR_STOP);
     }
 
     lpwr_stop_hook_post();
