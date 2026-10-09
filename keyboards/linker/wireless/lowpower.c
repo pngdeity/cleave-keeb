@@ -235,8 +235,23 @@ void lpwr_stop_hook_pre(void) {}
 void lpwr_stop_hook_post(void) __attribute__((weak));
 void lpwr_stop_hook_post(void) {}
 
+bool lpwr_wakeup_is_armed(void) __attribute__((weak));
+bool lpwr_wakeup_is_armed(void) {
+    return true;
+}
+
 void lpwr_stop_cb(void) __attribute__((weak));
 void lpwr_stop_cb(void) {
+
+    /* Enforce the invariant at the point of commitment: never enter STOP
+     * without a wake source armed, or the half is unrecoverable. A board whose
+     * wake sources are conditional reports this via lpwr_wakeup_is_armed();
+     * when it is false the stop is refused and the machine returns to NORMAL
+     * to try again later. */
+    if (!lpwr_wakeup_is_armed()) {
+        lpwr_set_state(LPWR_NORMAL);
+        return;
+    }
 
     lpwr_set_sleep_wakeupcd(LPWR_WAKEUP_NONE);
 

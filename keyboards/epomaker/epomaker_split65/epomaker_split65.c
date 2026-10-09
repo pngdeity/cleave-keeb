@@ -302,30 +302,16 @@ void suspend_power_down_user(void) {
 
 bool lpwr_is_allow_timeout_hook(void) {
 
-    /* The single rule for this board: a half may enter the idle-timeout sleep
-     * only when it is the master AND a wake source will actually be armed.
-     *
-     * The slave must never time itself out (it is not the decider): its
-     * mode-switch EXTIs are armed master-only in lpwr_exti_init_hook() and the
-     * column drive that would let a keypress wake it is gated on lower_sleep,
-     * so a self-timed-out slave has no way back. The master drives sleep for
-     * both halves via the 0xAA RPC instead, which sets lower_sleep first.
-     *
-     * The master must not enter the *un-ordered* sleep either. lower_sleep is
-     * only set on the low-battery path, so a plain idle timeout reaches STOP
-     * with lower_sleep == false, which arms none of the driver-side wake
-     * sources and leaves the master unwakeable (observed on BT). Until the
-     * ordered path is the only way in, refuse the timeout — matching what the
-     * USB exemption achieved by accident before. */
+    /* A half may only fall into the timeout path when it is the master and is
+     * not on USB. Whether a wake source will actually be armed is no longer
+     * decided here — that is the wake-source contract
+     * (`lpwr_wakeup_is_armed()`, enforced in the shared lowpower.c), so the
+     * stop is refused at the point of commitment instead of at each entry. */
     if (!is_keyboard_master()) {
         return false;
     }
 
     if (wireless_get_current_devs() == DEVS_USB) {
-        return false;
-    }
-
-    if (!lower_sleep) {
         return false;
     }
 

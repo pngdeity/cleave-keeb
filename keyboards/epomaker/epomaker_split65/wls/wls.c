@@ -198,6 +198,18 @@ void lpwr_stop_hook_pre(void) {
     }
 }
 
+bool lpwr_wakeup_is_armed(void) {
+
+    /* This board has no unconditional wake source: the mode-switch EXTIs are
+     * armed master-only in lpwr_exti_init_hook(), and the column drive that
+     * lets a keypress on either half pull a row low is gated on lower_sleep.
+     * So a half is only wake-armed on the ordered low-battery sleep, where
+     * lower_sleep was set first. Any other path (a plain idle timeout, or a
+     * slave timing itself out) would stop unwakeable, so report false and let
+     * the shared state machine refuse the stop. */
+    return is_keyboard_master() && lower_sleep;
+}
+
 void lpwr_stop_hook_post(void) {
     if (lower_sleep) {
         switch (lpwr_get_sleep_wakeupcd()) {
