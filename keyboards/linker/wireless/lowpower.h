@@ -25,12 +25,15 @@ typedef enum {
     LPWR_MODE_TIMEOUT = 0,
 } lpwr_mode_t;
 
-/* Wake-source contract. The low-power state machine will not commit to a stop
- * unless this returns true, so a half can never enter STOP without a wake
- * source armed. Boards with a fixed hardware wake source may ignore it; a board
- * whose wake sources are conditional (armed only on some paths) must implement
- * it to report whether any are currently live. */
-bool lpwr_wakeup_is_armed(void);
+/* Sleep policy contract. The low-power state machine will not commit to a stop
+ * unless this returns true, so a board can refuse any sleep it knows is unsafe.
+ * The default (weak) implementation returns true: a board that is always safe
+ * to stop needs to do nothing and keeps the stack's behaviour unchanged. A board
+ * whose stop is only safe on some paths (no interpreted wake source, or an
+ * unordered sleep) implements this to report whether the present stop is one it
+ * may take. The check runs at the single point of commitment (`lpwr_stop_cb()`)
+ * before `lpwr_enter_stop()`, so the decision cannot be bypassed by any caller. */
+bool lpwr_stop_is_allowed(void);
 
 lpwr_state_t lpwr_get_state(void);
 lpwr_mode_t lpwr_get_mode(void);

@@ -303,10 +303,11 @@ void suspend_power_down_user(void) {
 bool lpwr_is_allow_timeout_hook(void) {
 
     /* A half may only fall into the timeout path when it is the master and is
-     * not on USB. Whether a wake source will actually be armed is no longer
-     * decided here — that is the wake-source contract
-     * (`lpwr_wakeup_is_armed()`, enforced in the shared lowpower.c), so the
-     * stop is refused at the point of commitment instead of at each entry. */
+     * not on USB. Whether the resulting stop is one this board may take is
+     * decided once, at the point of commitment: the sleep-policy contract
+     * (`lpwr_stop_is_allowed()`, enforced in the shared lowpower.c) refuses an
+     * unordered stop there, so the rule lives in one place rather than at each
+     * entry. */
     if (!is_keyboard_master()) {
         return false;
     }

@@ -198,15 +198,21 @@ void lpwr_stop_hook_pre(void) {
     }
 }
 
-bool lpwr_wakeup_is_armed(void) {
+bool lpwr_stop_is_allowed(void) {
 
-    /* This board has no unconditional wake source: the mode-switch EXTIs are
-     * armed master-only in lpwr_exti_init_hook(), and the column drive that
-     * lets a keypress on either half pull a row low is gated on lower_sleep.
-     * So a half is only wake-armed on the ordered low-battery sleep, where
-     * lower_sleep was set first. Any other path (a plain idle timeout, or a
-     * slave timing itself out) would stop unwakeable, so report false and let
-     * the shared state machine refuse the stop. */
+    /* This board's sleep policy: only the master may stop, and only when it has
+     * been ordered to (lower_sleep), which is the low-battery path. A plain idle
+     * timeout reaches STOP unordered, and on that path the wake is not
+     * interpreted — the board's lpwr_stop_hook_post() is gated on lower_sleep,
+     * and a wake code of LPWR_WAKEUP_UART returns the machine to LPWR_STOP
+     * without ever running lpwr_wakeup_cb(). The half then re-enters STOP with
+     * no rail re-raise and no matrix re-init: dark and unresponsive (observed on
+     * Bluetooth, where the master is not USB-exempt). Refuse any unordered stop.
+     *
+     * This is a policy, not a statement that no wake source is armed — on both
+     * paths the master arms its own rows, the mode-switch pins and the cable
+     * pin. What lower_sleep actually gates is the cross-half column drive, the
+     * module-sleep command, and the post-stop wake interpretation. */
     return is_keyboard_master() && lower_sleep;
 }
 
