@@ -67,6 +67,11 @@ bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev) {
             break;
     }
     if (sw_mode) {
+        /* `sw_mode` is the one predicate that means "the switch really moved",
+         * so this is the correct place to confirm the new channel: the
+         * indicator fires here and nowhere a re-assert could reach (defect:
+         * see `wls_indicate_devs()`). */
+        wls_indicate_devs(wireless_get_current_devs(), false);
         hs_rgb_blink_set_timer(timer_read32());
         suspend_wakeup_init();
         return true;

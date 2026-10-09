@@ -433,6 +433,7 @@ uint32_t wls_process_long_press(uint32_t trigger_time, void *cb_arg) {
                 /* Re-pair the profile the driver already owns (14b): select it
                  * with reset=true so the module gets CLEAN + devinfo + PAIR. */
                 bluetooth_select_profile(DEVS_BT1, true);
+                wls_indicate_devs(DEVS_BT1, true);
             }
 
         } break;
@@ -441,6 +442,7 @@ uint32_t wls_process_long_press(uint32_t trigger_time, void *cb_arg) {
             hs_modeio_detection(true, &mode, confinfo.last_btdevs);
             if ((mode == hs_bt) || (mode == hs_wireless) || (mode == hs_none)) {
                 bluetooth_select_profile(DEVS_BT2, true);
+                wls_indicate_devs(DEVS_BT2, true);
             }
         } break;
         case KC_BT3: {
@@ -448,6 +450,7 @@ uint32_t wls_process_long_press(uint32_t trigger_time, void *cb_arg) {
             hs_modeio_detection(true, &mode, confinfo.last_btdevs);
             if ((mode == hs_bt) || (mode == hs_wireless) || (mode == hs_none)) {
                 bluetooth_select_profile(DEVS_BT3, true);
+                wls_indicate_devs(DEVS_BT3, true);
             }
         } break;
         case KC_2G4: {
@@ -455,6 +458,7 @@ uint32_t wls_process_long_press(uint32_t trigger_time, void *cb_arg) {
             hs_modeio_detection(true, &mode, confinfo.last_btdevs);
             if ((mode == hs_2g4) || (mode == hs_wireless) || (mode == hs_none)) {
                 wireless_devs_change(wireless_get_current_devs(), DEVS_2G4, true);
+                wls_indicate_devs(DEVS_2G4, true);
             }
         } break;
         case EE_CLR: {
@@ -493,6 +497,7 @@ bool process_record_wls(uint16_t keycode, keyrecord_t *record) {
                     bluetooth_select_profile(wls_dev, false);                                                                                                          \
                 }                                                                                                                                                      \
                 wls_persist_devs();                                                                                                                                    \
+                wls_indicate_devs((wls_dev), false);                                                                                                                   \
                 if (wls_process_long_press_token == INVALID_DEFERRED_TOKEN) {                                                                                          \
                     wls_process_long_press_token = defer_exec(WLS_KEYCODE_PAIR_TIME, wls_process_long_press, &keycode_shadow);                                         \
                 }                                                                                                                                                      \
@@ -1348,20 +1353,33 @@ void wls_persist_devs(void) {
     eeconfig_confinfo_update(confinfo.raw);
 }
 
+/* Bookkeeping only (defect: see `wls_indicate_devs()`). This hook fires for
+ * every device-index change *and* for periodic re-asserts (the master's 2 s
+ * sync, the disconnected-retry, the indicator callback), so it must not have a
+ * visible effect: a transient flash welded here fires on non-events and blinks
+ * a half on a clock. Its sole job is to mirror the vendor device index into
+ * `confinfo` (RAM); the user-visible confirmation is `wls_indicate_devs()`,
+ * called only on a real transition. */
 void wireless_devs_change_kb(uint8_t old_devs, uint8_t new_devs, bool reset) {
-    wls_rgb_indicator_reset = reset;
+    (void)old_devs;
+    (void)new_devs;
+    (void)reset;
 
-    /* RAM-only mirror of the vendor device index. No EEPROM write here: this
-     * hook fires for every device-index change, including switch-driven ones,
-     * so persisting here is what let a boot-time switch read (or a stray change)
-     * overwrite the user's stored choice — the defect-4 trap. Persistence now
-     * happens only in the user keycode path (`wls_persist_devs()`), so the switch
-     * is level-authoritative and the stored host is a record of explicit intent,
-     * not of the last boot. */
     if (confinfo.devs != wireless_get_current_devs()) {
         confinfo.devs = wireless_get_current_devs();
         if (confinfo.devs > 0 && confinfo.devs < 4) confinfo.last_btdevs = confinfo.devs;
     }
+}
+
+/* The user-visible transport confirmation: flash the selected channel's LED
+ * once. Called ONLY from genuine transition sites (the mode-switch edge, the
+ * Fn+Q/W/E keycode path, a re-pair long-press) — never from a re-assert, so the
+ * indicator can only mean "the channel just changed". `reset` selects the
+ * re-pair (fast) vs select (slow) cadence. This is the same separation applied
+ * to the LED rail: the effect has one owner and is impossible to trigger by a
+ * no-op. */
+void wls_indicate_devs(uint8_t new_devs, bool reset) {
+    wls_rgb_indicator_reset = reset;
 
     switch (new_devs) {
         case DEVS_BT1: {
@@ -1431,7 +1449,11 @@ void connection_host_changed_kb(connection_host_t host) {
 
 bool rgb_matrix_wls_indicator_cb(void) {
     if (*md_getp_state() != MD_STATE_CONNECTED) {
-        wireless_devs_change_kb(wireless_get_current_devs(), wireless_get_current_devs(), wls_rgb_indicator_reset);
+        /* Re-arm the same flash (do not re-run a "change") while the module is
+         * still not connected: a pairing-attempt confirmation repeats until it
+         * links, which is the indicator's own repeat policy, not a transport
+         * change. */
+        wls_indicate_devs(wireless_get_current_devs(), wls_rgb_indicator_reset);
         return true;
     }
 
