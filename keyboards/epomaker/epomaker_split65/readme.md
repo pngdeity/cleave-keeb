@@ -2,6 +2,13 @@
 
 A 65% wireless split keyboard.
 
+> **In this repository, read `docs/HARDWARE.md` and `AGENTS.md` first.** The
+> commands and DFU instructions below are the upstream/vendor shape and are
+> **not correct for this tree**: bare `make` and `make ...:flash` are forbidden
+> here (use `./bin/make`; flashing is a human-only action), Esc-hold bootmagic is
+> broken on our build, and the left half has no reset switch — it enters DFU via
+> the spacebar-hole short. Details in the root `docs/`.
+
 * Keyboard Maintainer: [yangzheng20003](https://github.com/yangzheng20003)
 * Hardware Supported: EPOMAKER Split65 (WB32FQ95)
 * Hardware Availability: [epomaker](https://www.epomaker.com)
