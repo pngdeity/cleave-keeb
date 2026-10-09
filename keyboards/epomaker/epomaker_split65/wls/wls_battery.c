@@ -8,6 +8,7 @@
 #    include "raw_hid.h"
 #    include "usb_descriptor.h"
 #    include "sync_timer.h"
+#    include "connection.h"
 
 /* The wireless stack tunnels raw HID through md_raw.c's replaced_hid_send()
  * instead of raw_hid_send(): on USB it writes the raw endpoint, otherwise it
@@ -47,10 +48,10 @@ void raw_hid_receive(uint8_t *data, uint8_t length) {
 
 #    ifdef WLS_BATTERY_PUSH_ENABLE
 void kb_battery_push_task(void) {
-    static uint32_t push_timer = 0x00;
+    static uint32_t       push_timer = 0x00;
     kb_battery_snapshot_t snap;
 
-    if (!is_keyboard_master() || get_transport() == TRANSPORT_USB || *md_getp_state() != MD_STATE_CONNECTED) {
+    if (!is_keyboard_master() || connection_get_host() == CONNECTION_HOST_USB || *md_getp_state() != MD_STATE_CONNECTED) {
         push_timer = 0x00;
         return;
     }

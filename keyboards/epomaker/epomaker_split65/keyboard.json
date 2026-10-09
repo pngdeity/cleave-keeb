@@ -20,6 +20,7 @@
     },
     "features": {
         "battery": true,
+        "bluetooth": true,
         "command": false,
         "connection": true,
         "console": false,

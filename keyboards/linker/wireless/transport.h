@@ -3,16 +3,10 @@
 
 #pragma once
 
-typedef enum {
-    TRANSPORT_NONE,
-    TRANSPORT_USB,
-    TRANSPORT_WLS,
-} transport_t;
-
-void wls_transport_enable(bool enable);
-void usb_transport_enable(bool enable);
-void set_transport(transport_t new_transport);
-transport_t get_transport(void);
+/* The vendor transport selector is gone (item 14d): the active driver is
+ * upstream's `host_get_active_driver()`, and the physical USB connect/
+ * disconnect is the board's `wls_usb_connect()`. Only the USB power helpers
+ * and remote wakeup remain, implemented by the board and `transport.c`. */
 void usb_power_connect(void);
 void usb_power_disconnect(void);
 void usb_remote_wakeup(void);

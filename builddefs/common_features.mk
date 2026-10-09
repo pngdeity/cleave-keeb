@@ -928,6 +928,14 @@ ifeq ($(strip $(BLUETOOTH_ENABLE)), yes)
     endif
 endif
 
+WIRELESS_2P4GHZ_ENABLE ?= no
+ifeq ($(strip $(WIRELESS_2P4GHZ_ENABLE)), yes)
+    OPT_DEFS += -DWIRELESS_2P4GHZ_ENABLE
+    CONNECTION_ENABLE := yes
+    COMMON_VPATH += $(DRIVER_PATH)/wireless
+    SRC += $(DRIVER_PATH)/wireless/wireless_2p4ghz.c
+endif
+
 ENCODER_ENABLE ?= no
 ENCODER_DRIVER ?= quadrature
 VALID_ENCODER_DRIVER_TYPES := quadrature custom

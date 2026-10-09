@@ -4,6 +4,7 @@
 #include "wls.h"
 #include "usb_descriptor.h"
 #include "lowpower_logic.h"
+#include "transport_logic.h"
 
 static ioline_t col_pins_left[MATRIX_COLS]  = MATRIX_COL_PINS;
 static ioline_t col_pins_right[MATRIX_COLS] = MATRIX_COL_PINS_RIGHT;
@@ -16,10 +17,10 @@ bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev) {
     }
     scan_timer = timer_read32();
 #if defined(HS_BT_DEF_PIN) && defined(HS_2G4_DEF_PIN)
-    uint8_t now_mode         = 0x00;
-    uint8_t hs_mode          = 0x00;
+    uint8_t        now_mode  = 0x00;
+    uint8_t        hs_mode   = 0x00;
     static uint8_t last_mode = 0x00;
-    bool sw_mode             = false;
+    bool           sw_mode   = false;
     now_mode                 = (HS_GET_MODE_PIN(HS_USB_PIN_STATE) ? 3 : (HS_GET_MODE_PIN(HS_BT_PIN_STATE) ? 1 : ((HS_GET_MODE_PIN(HS_2G4_PIN_STATE) ? 2 : 0))));
     hs_mode                  = (*mode >= DEVS_BT1 && *mode <= DEVS_BT5) ? 1 : ((*mode == DEVS_2G4) ? 2 : ((*mode == DEVS_USB) ? 3 : 0));
     sw_mode                  = ((update || (last_mode == now_mode)) && (hs_mode != now_mode)) ? true : false;
@@ -40,14 +41,12 @@ bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev) {
             break;
         case 3:
             *mode = hs_usb;
-            if (sw_mode)
-                wireless_devs_change(wireless_get_current_devs(), DEVS_USB, false);
+            if (sw_mode) wireless_devs_change(wireless_get_current_devs(), DEVS_USB, false);
 
             break;
         default:
             break;
     }
-
     if (sw_mode) {
         hs_rgb_blink_set_timer(timer_read32());
         suspend_wakeup_init();
@@ -60,12 +59,36 @@ bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev) {
     return false;
 }
 
+/* Derive the device index from the physical switch LEVEL alone (no edge, no
+ * persisted state). Used once at boot so the switch is authoritative over a
+ * persisted `confinfo.devs`: a stale wireless index restored from EEPROM (the
+ * defect-4 lockout) is corrected the moment the board comes up, instead of
+ * waiting for a switch edge that never comes. The switch cannot express which
+ * of BT1..5, so a BT position returns the caller's `lsat_btdev`. The decision
+ * itself is the tested pure core (`transport_logic.c`); this only reads pins. */
+uint8_t hs_mode_switch_devs(uint8_t lsat_btdev) {
+#if defined(HS_BT_DEF_PIN) && defined(HS_2G4_DEF_PIN)
+    hsm_switch_pos_t pos;
+    if (HS_GET_MODE_PIN(HS_USB_PIN_STATE)) {
+        pos = HSM_SWITCH_USB;
+    } else if (HS_GET_MODE_PIN(HS_BT_PIN_STATE)) {
+        pos = HSM_SWITCH_BT;
+    } else if (HS_GET_MODE_PIN(HS_2G4_PIN_STATE)) {
+        pos = HSM_SWITCH_2G4;
+    } else {
+        pos = HSM_SWITCH_UNKNOWN;
+    }
+    return hsm_boot_devs(pos, lsat_btdev);
+#else
+    (void)lsat_btdev;
+    return DEVS_USB;
+#endif
+}
+
 static uint32_t hs_linker_rgb_timer = 0x00;
 
 bool hs_mode_scan(bool update, uint8_t moude, uint8_t lsat_btdev) {
-
     if (hs_modeio_detection(update, &moude, lsat_btdev)) {
-
         return true;
     }
     hs_rgb_blink_hook();
@@ -83,10 +106,10 @@ uint32_t hs_rgb_blink_get_timer(void) {
 bool hs_rgb_blink_hook() {
     static uint8_t last_status;
 
-    if (!is_keyboard_master())  {
+    if (!is_keyboard_master()) {
         return false;
     }
-    
+
     if (last_status != *md_getp_state()) {
         last_status = *md_getp_state();
         hs_rgb_blink_set_timer(0x00);
@@ -126,7 +149,6 @@ bool hs_rgb_blink_hook() {
 }
 
 void lpwr_exti_init_hook(void) {
-
 #ifdef HS_BT_DEF_PIN
     if (is_keyboard_master()) {
         gpio_set_pin_input_high(HS_BT_DEF_PIN);
@@ -142,7 +164,7 @@ void lpwr_exti_init_hook(void) {
         palEnableLineEvent(HS_2G4_DEF_PIN, PAL_EVENT_MODE_BOTH_EDGES);
     }
 #endif
-    
+
     if (lower_sleep) {
 #if DIODE_DIRECTION == ROW2COL
         /* Drive both halves' columns high so a keypress on either half pulls
@@ -184,13 +206,11 @@ void palcallback_cb(uint8_t line) {
         } break;
 #endif
         default: {
-
         } break;
     }
 }
 
 void lpwr_stop_hook_pre(void) {
-
     gpio_write_pin_low(LED_POWER_EN_PIN);
 
     if (lower_sleep) {
@@ -200,7 +220,6 @@ void lpwr_stop_hook_pre(void) {
 }
 
 bool lpwr_stop_is_allowed(void) {
-
     /* This board's sleep policy: only the master may stop, and only when it has
      * been ordered to (lower_sleep), which is the low-battery path. A plain idle
      * timeout reaches STOP unordered, and on that path the wake is not
@@ -218,7 +237,6 @@ bool lpwr_stop_is_allowed(void) {
 }
 
 uint32_t lpwr_wakeup_armed_mask(void) {
-
     /* The codes this board actually arms, and only those. UART is deliberately
      * absent: this board's lpwr_exti_init() never arms UART_RX_PIN (the
      * module's own traffic would defeat deep sleep), yet the WB32 EXTI reports
@@ -229,7 +247,6 @@ uint32_t lpwr_wakeup_armed_mask(void) {
 }
 
 void lpwr_stop_hook_post(void) {
-
     /* The state transition itself is now owned by lpwr_stop_cb(), which
      * interprets the wake as a set against lpwr_wakeup_armed_mask(). All this
      * hook needs to do is drop the board's ordered-sleep flag on a real wake,

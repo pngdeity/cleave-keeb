@@ -3,6 +3,14 @@
 
 #include "quantum.h"
 #include "wireless.h"
+#include "connection.h"
+#include "usb_device_state.h"
+#include "transport.h"
+
+/* Board-provided USB data-line connect/disconnect primitive (item 14d). The
+ * vendor `set_transport()` swap is gone; the physical side of a host change is
+ * the board's, declared here so the shared stack can drive it at boot. */
+void wls_usb_connect(bool enable);
 
 #ifndef WLS_INQUIRY_BAT_TIME
 #    define WLS_INQUIRY_BAT_TIME 3000
@@ -187,16 +195,11 @@ void wireless_devs_change_kb(uint8_t old_devs, uint8_t new_devs, bool reset) __a
 void wireless_devs_change_kb(uint8_t old_devs, uint8_t new_devs, bool reset) {}
 
 void wireless_devs_change(uint8_t old_devs, uint8_t new_devs, bool reset) {
-    bool changed = (old_devs == DEVS_USB) ? (new_devs != DEVS_USB) : (new_devs == DEVS_USB);
-
-    if (changed) {
-        if (new_devs == DEVS_USB) set_transport(TRANSPORT_USB);
-        else if (*md_getp_state() == MD_STATE_CONNECTED) {
-            //set_transport((new_devs != DEVS_USB) ? TRANSPORT_WLS : TRANSPORT_USB);
-            set_transport(TRANSPORT_WLS);
-        }
-    }
-
+    /* No transport swap here. The active driver is chosen by upstream's
+     * `host_get_active_driver()` from the connection host, and the physical USB
+     * connect/disconnect is driven by the board's `connection_host_changed_kb()`
+     * (item 14d). This function's job is only the vendor device index and the
+     * module-facing change. */
     if ((wls_devs != new_devs) || reset) {
         *md_getp_state()     = MD_STATE_DISCONNECTED;
         *md_getp_indicator() = 0;
@@ -221,6 +224,17 @@ void wireless_post_task(void) __attribute__((weak));
 void wireless_post_task(void) {}
 
 void wireless_task(void) {
+    static bool usb_initialized = false;
+
+    if (!usb_initialized) {
+        /* One-time: bring the USB data line up for the initial host. Upstream's
+         * `host_init()`/`connection_init()` run before post-init, so the mode
+         * switch has not been read yet; `connection_host_changed_kb()` does the
+         * real connect once the switch is applied, and this guard only covers
+         * boards whose switch resolve leaves the host at USB. */
+        wls_usb_connect(connection_get_host() == CONNECTION_HOST_USB);
+        usb_initialized = true;
+    }
 
     wireless_pre_task();
     lpwr_task();
@@ -230,7 +244,7 @@ void wireless_task(void) {
     /* usb_remote_wakeup() should be invoked last so that we have chance
      * to switch to wireless after start-up when usb is not connected
      */
-    if (get_transport() == TRANSPORT_USB) {
+    if (connection_get_host() == CONNECTION_HOST_USB) {
         usb_remote_wakeup();
     } else if (lpwr_get_state() == LPWR_NORMAL) {
         static uint32_t inqtimer = 0x00;

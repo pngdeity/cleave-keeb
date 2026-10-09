@@ -36,8 +36,17 @@ extern bool bat_full_flag;
 bool hs_rgb_blink_hook(void);
 bool hs_mode_scan(bool update, uint8_t moude, uint8_t lsat_btdev);
 bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev);
+uint8_t hs_mode_switch_devs(uint8_t lsat_btdev);
 void hs_rgb_blink_set_timer(uint32_t time);
 bool hs_transport_arbitrate_cable(bool cable_present, bool prev_present);
+void wls_persist_devs(void);
+
+/* BT profile selection, owned by the Bluetooth driver (item 14b): which of the
+ * module's BT1..BT5 profiles is active, and re-pairing it. The sub-index has no
+ * home in upstream's `connection` model, so it lives with the driver that
+ * actually carries it to the module. */
+void    bluetooth_select_profile(uint8_t profile, bool reset);
+uint8_t bluetooth_get_profile(void);
 
 /* Battery report over raw HID (see docs/PROTOCOL.md). The report is
  * RAW_EPSIZE bytes; only the following are meaningful, the rest are zero. */
@@ -48,6 +57,14 @@ bool hs_transport_arbitrate_cable(bool cable_present, bool prev_present);
 #define KB_BATTERY_IDX_CHARGE 4
 #define KB_BATTERY_IDX_TRANSPORT 5
 #define KB_BATTERY_IDX_MODEL 6
+
+/* Selector readback (provisional, for hardware verification of items 14b/14c).
+ * The persisted host and the BT sub-profile are otherwise unobservable without a
+ * working BLE link, so they are exposed here: index 7 = upstream's
+ * `config.desired_host` (CONNECTION_HOST_* raw value), index 8 = the BT driver's
+ * active profile (DEVS_BT1..BT5). Both are test-only and may be reclaimed. */
+#define KB_BATTERY_IDX_HOST   7
+#define KB_BATTERY_IDX_BTSUB  8
 
 /* KB_BATTERY_IDX_CHARGE */
 enum kb_battery_charge {
