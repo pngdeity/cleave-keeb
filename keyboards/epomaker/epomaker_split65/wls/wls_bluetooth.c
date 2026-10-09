@@ -3,6 +3,7 @@
 
 #include "bluetooth.h"
 #include "wls.h"
+#include "transport_logic.h"
 
 /* Upstream's `custom` Bluetooth driver contract (drivers/bluetooth/bluetooth.h).
  * This board's Bluetooth is a third-party UART module driven over the vendor
@@ -17,15 +18,16 @@
  * takes while the module is on a Bluetooth profile. (The vendor `set_transport()`
  * that used to swap `host_driver_t` was deleted in item 14d.) */
 
-/* The BT profile sub-index (BT1..BT5) is a property of this driver, not a
- * transport. Upstream's `connection` model can express "send over Bluetooth"
- * (CONNECTION_HOST_BLUETOOTH) but not *which* profile, so owning the index here
- * keeps the vendor `confinfo.devs` from acting as a second transport selector
- * (item 14b). `md_devs_change()` is the module-facing primitive that carries
- * the profile to the CH582F (DEVCTRL_BT1..BT5, plus CLEAN+devinfo+PAIR on
- * re-pair), so the driver's notion of "current profile" and the module's stay
- * in lockstep without a second persisted selector. */
-static uint8_t wls_bt_profile = DEVS_BT1;
+/* The BT profile sub-index (BT1..BT5) is a property of the current device index,
+ * not a second piece of state. Upstream's `connection` model can express "send
+ * over Bluetooth" (CONNECTION_HOST_BLUETOOTH) but not *which* profile, so the
+ * profile is *derived* from `wireless_get_current_devs()` (the one transport
+ * authority) via the pure `hsm_profile_of_devs()`. It is deliberately NOT cached
+ * in a variable: a cached copy can desync from the device index (any
+ * `wireless_devs_change` that does not go through this driver) and then lie in
+ * the battery readback. `md_devs_change()` is the module-facing primitive that
+ * carries the profile to the CH582F (DEVCTRL_BT1..BT5, plus CLEAN+devinfo+PAIR on
+ * re-pair). */
 
 static bool wls_is_bt_devs(uint8_t devs) {
     return devs >= DEVS_BT1 && devs <= DEVS_BT5;
@@ -40,16 +42,14 @@ void bluetooth_select_profile(uint8_t profile, bool reset) {
         profile = DEVS_BT1;
     }
 
-    wls_bt_profile = profile;
-
-    /* Change the *device index*, not just the module. `wireless_devs_change()`
-     * sets `wls_devs` (so `wireless_get_current_devs()` and the vendor device
-     * index follow the profile), resets the module link state, pushes the
-     * profile to the module via `md_devs_change()`, and drives the indicator
-     * through `wireless_devs_change_kb()`. Calling `md_devs_change()` directly
-     * (as this did) told the module but left `wls_devs` on the old profile, so
-     * the left-half LED kept blinking the original profile (BT1 → Q) forever —
-     * the profile selection was invisible and unobservable.
+    /* Change the *device index*, not a cached profile. `wireless_devs_change()`
+     * sets `wls_devs` (so `wireless_get_current_devs()` — and therefore the
+     * profile this driver reports — follows the profile), resets the module link
+     * state, pushes the profile to the module via `md_devs_change()`, and drives
+     * the indicator through `wireless_devs_change_kb()`. Calling `md_devs_change()`
+     * directly (as this once did) told the module but left `wls_devs` on the old
+     * profile, so the left-half LED kept blinking the original profile (BT1 → Q)
+     * forever — the selection was invisible and unobservable.
      *
      * `reset` preserves the vendor distinction: false = select the profile,
      * true = re-pair it (CLEAN + devinfo + PAIR on the module). A short keycode
@@ -58,7 +58,7 @@ void bluetooth_select_profile(uint8_t profile, bool reset) {
 }
 
 uint8_t bluetooth_get_profile(void) {
-    return wls_bt_profile;
+    return hsm_profile_of_devs(wireless_get_current_devs());
 }
 
 static bool wls_bt_link_up(void) {

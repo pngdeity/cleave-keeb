@@ -40,3 +40,9 @@ bool hsm_keycode_allowed(hsm_switch_pos_t pos, uint8_t target_devs);
  * into shared state that every later keypress overwrites (the defect this
  * encodes against). */
 int16_t hsm_long_press_devs(uint16_t keycode);
+
+/* The BT sub-profile (1..5) for a device index, or 0 when the index is not on a
+ * BT profile. The profile is *derived* from the device index — the one transport
+ * authority — rather than kept in a second variable that can desync and then
+ * lie in the battery readback. */
+uint8_t hsm_profile_of_devs(uint8_t devs);

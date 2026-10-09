@@ -60,6 +60,13 @@ bool hsm_keycode_allowed(hsm_switch_pos_t pos, uint8_t target_devs) {
     }
 }
 
+uint8_t hsm_profile_of_devs(uint8_t devs) {
+    /* The BT profile number IS the device index on a BT1..5 index (DEVS_BT1..5 =
+     * 1..5), so the profile is derived, never stored. 0 means "no BT profile"
+     * (USB / 2.4 GHz), which is what the readback should report then. */
+    return (devs >= HSM_DEVS_BT1 && devs <= HSM_DEVS_BT5) ? devs : 0;
+}
+
 int16_t hsm_long_press_devs(uint16_t keycode) {
     switch (keycode) {
         case HSM_KC_BT1:

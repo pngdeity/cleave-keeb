@@ -117,3 +117,25 @@ TEST_F(TransportLogic, long_press_target_is_a_keycode_table) {
     EXPECT_EQ(-1, hsm_long_press_devs(0x0004)); /* KC_A */
     EXPECT_EQ(-1, hsm_long_press_devs(0x7E10)); /* a different keyboard keycode */
 }
+
+/* The BT profile is *derived* from the device index, never stored: BT1..5 map to
+ * their own number (the readback), and any non-BT index maps to 0 (no profile).
+ * This is what removes the second RAM variable that could desync from the device
+ * index and then lie in the battery readback (audit fix 2). */
+TEST_F(TransportLogic, bt_profile_is_a_pure_function_of_the_device_index) {
+    /* On a BT profile the profile number is the device index (1..5). */
+    EXPECT_EQ(DEVS_BT1, hsm_profile_of_devs(DEVS_BT1));
+    EXPECT_EQ(DEVS_BT2, hsm_profile_of_devs(DEVS_BT2));
+    EXPECT_EQ(DEVS_BT5, hsm_profile_of_devs(DEVS_BT5));
+
+    /* Off a BT profile there is no profile. */
+    EXPECT_EQ(0, hsm_profile_of_devs(DEVS_USB));
+    EXPECT_EQ(0, hsm_profile_of_devs(DEVS_2G4));
+    EXPECT_EQ(0, hsm_profile_of_devs(0xFF));
+
+    /* Round trip: the profile read back from a BT index selects that same index,
+     * so the reported profile and the transport authority cannot disagree. */
+    for (uint8_t d = DEVS_BT1; d <= DEVS_BT5; d++) {
+        EXPECT_EQ(d, hsm_profile_of_devs(d));
+    }
+}
