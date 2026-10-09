@@ -30,9 +30,12 @@ enum modeio_mode {
     hs_wireless
 };
 
-extern bool lower_sleep;
 extern bool charging_state;
 extern bool bat_full_flag;
+/* The ordered-sleep flag's single authority: set/clear through the setter,
+ * read as a query. One writer, no side-effecting reads. */
+void wls_order_sleep(bool ordered);
+bool wls_sleep_ordered(void);
 bool hs_rgb_blink_hook(void);
 bool hs_mode_scan(bool update, uint8_t moude, uint8_t lsat_btdev);
 bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev);

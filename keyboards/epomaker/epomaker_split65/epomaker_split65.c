@@ -78,7 +78,6 @@ static uint32_t ee_clr_timer          = 0;
 bool            test_white_light_flag = false;
 HSV             start_hsv;
 bool            no_record_fg;
-bool            lower_sleep = false;
 uint8_t         pov;
 static bool     im_bat_req_charging_flag = false;
 uint8_t         buff[]                   = {14, 8, 2, 1, 1, 1, 1, 1, 1, 1, 0};
@@ -362,7 +361,7 @@ bool lpwr_is_allow_presleep_hook(void) {
         master_to_slave_t m2s = {0};
         slave_to_master_t s2m = {0};
         m2s.cmd               = 0xAA;
-        m2s.body[0]           = lower_sleep;
+        m2s.body[0]           = wls_sleep_ordered();
         if (transaction_rpc_exec(USER_SYNC_MMS, sizeof(m2s), &m2s, sizeof(s2m), &s2m)) {
             if (s2m.resp == 0x00) {
             }
@@ -1560,8 +1559,10 @@ void bat_indicators(void) {
 
             if (battery_process_time && timer_elapsed32(battery_process_time) > 60000) {
                 battery_process_time = 0;
-                lower_sleep          = true;
-                lpwr_set_timeout_manual(true);
+                if (hsm_should_order_sleep(bat_level, charging_state, BATTERY_CAPACITY_STOP)) {
+                    wls_order_sleep(true);
+                    lpwr_set_timeout_manual(true);
+                }
             }
         }
     } else {
@@ -1780,8 +1781,8 @@ void user_sync_mms_slave_handler(uint8_t in_buflen, const void *in_data, uint8_t
                 palSetLineMode(SERIAL_USART_RX_PIN, PAL_OUTPUT_TYPE_OPENDRAIN);
                 palSetLineMode(SERIAL_USART_TX_PIN, PAL_OUTPUT_TYPE_OPENDRAIN);
             }
-            s2m->resp   = 0x00;
-            lower_sleep = m2s->body[0];
+            s2m->resp = 0x00;
+            wls_order_sleep(m2s->body[0]);
             lpwr_set_timeout_manual(true);
             break;
         case 0xBB:

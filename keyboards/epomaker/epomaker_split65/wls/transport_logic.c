@@ -161,3 +161,7 @@ hsm_link_action_t hsm_link_watch(hsm_link_state_t state, bool state_changed, uin
             return HSM_LINK_ACT_NONE;
     }
 }
+
+bool hsm_should_order_sleep(uint8_t level, bool charging, uint8_t stop_threshold) {
+    return !charging && level <= stop_threshold;
+}

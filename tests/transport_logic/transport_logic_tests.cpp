@@ -211,3 +211,22 @@ TEST_F(TransportLogic, link_watch_clears_foreign_deadlines) {
     EXPECT_EQ(0u, t.reconnect_at);
     EXPECT_EQ(0u, t.sleep_at);
 }
+
+/* The low-battery sleep order is a pure function of the battery facts: order a
+ * stop only at/below the stop threshold while not charging. This pins the
+ * decision the board's battery tick makes before it calls `wls_order_sleep`. */
+TEST_F(TransportLogic, sleep_order_is_a_pure_function_of_battery_and_charge) {
+    const uint8_t STOP = 5;
+
+    /* At or below the threshold, not charging: order. */
+    EXPECT_TRUE(hsm_should_order_sleep(0, false, STOP));
+    EXPECT_TRUE(hsm_should_order_sleep(STOP, false, STOP));
+
+    /* Above the threshold: do not order. */
+    EXPECT_FALSE(hsm_should_order_sleep(STOP + 1, false, STOP));
+    EXPECT_FALSE(hsm_should_order_sleep(100, false, STOP));
+
+    /* Charging always overrides: never order a stop while charging. */
+    EXPECT_FALSE(hsm_should_order_sleep(0, true, STOP));
+    EXPECT_FALSE(hsm_should_order_sleep(STOP, true, STOP));
+}

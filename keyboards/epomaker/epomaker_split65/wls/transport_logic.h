@@ -115,3 +115,18 @@ hsm_link_action_t hsm_link_watch(hsm_link_state_t state, bool state_changed, uin
  * other stays cleared, so activity cannot arm a countdown for a state we are
  * not in. Pure; the shell stores the result. */
 void hsm_link_restart(hsm_link_state_t state, uint32_t now, uint32_t reconnect_timeout, uint32_t sleep_timeout, hsm_link_timers_t *timers);
+
+/* ---------------------------------------------------------------------------
+ * Ordered sleep: when the battery alone justifies a stop, as a pure decision.
+ *
+ * A half may only take a STOP when it has been *ordered* to (the board's
+ * `lpwr_stop_is_allowed()` refuses an unordered stop). One order source is the
+ * low-battery path: at or below the stop threshold, while not charging, the
+ * half orders itself to sleep. The decision is pure — it depends only on the
+ * battery facts — so the tick that samples them holds no policy.
+ * ------------------------------------------------------------------------- */
+
+/* Whether the low-battery path should order a stop, given the battery level and
+ * whether the board is charging. True only at/below `stop_threshold` while not
+ * charging. */
+bool hsm_should_order_sleep(uint8_t level, bool charging, uint8_t stop_threshold);

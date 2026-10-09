@@ -28,6 +28,21 @@ void wls_led_rail_apply(void) {
 #endif
 }
 
+/* The ordered-sleep flag: whether this half has been *ordered* to stop (as
+ * opposed to reaching an idle timeout). One authority, one setter. It is set by
+ * the low-battery path (`wls_order_sleep`) or by the master's order over the
+ * split link, and cleared when a stop wakes. Reads are queries
+ * (`wls_sleep_ordered`) so no consumer mutates it as a side effect. */
+static bool ordered_sleep = false;
+
+void wls_order_sleep(bool ordered) {
+    ordered_sleep = ordered;
+}
+
+bool wls_sleep_ordered(void) {
+    return ordered_sleep;
+}
+
 bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev) {
     static uint32_t scan_timer = 0x00;
 
@@ -192,7 +207,7 @@ void lpwr_exti_init_hook(void) {
     }
 #endif
 
-    if (lower_sleep) {
+    if (wls_sleep_ordered()) {
 #if DIODE_DIRECTION == ROW2COL
         /* Drive both halves' columns high so a keypress on either half pulls
          * its row low and can wake the board. */
@@ -240,7 +255,7 @@ void palcallback_cb(uint8_t line) {
 void lpwr_stop_hook_pre(void) {
     gpio_write_pin_low(LED_POWER_EN_PIN);
 
-    if (lower_sleep) {
+    if (wls_sleep_ordered()) {
         md_send_devctrl(MD_SND_CMD_DEVCTRL_USB);
         wait_ms(200);
     }
@@ -248,9 +263,9 @@ void lpwr_stop_hook_pre(void) {
 
 bool lpwr_stop_is_allowed(void) {
     /* This board's sleep policy: only the master may stop, and only when it has
-     * been ordered to (lower_sleep), which is the low-battery path. A plain idle
+     * been ordered to (`wls_sleep_ordered()`), which is the low-battery path. A plain idle
      * timeout reaches STOP unordered, and on that path the wake is not
-     * interpreted — the board's lpwr_stop_hook_post() is gated on lower_sleep,
+     * interpreted — the board's lpwr_stop_hook_post() is gated on the same flag,
      * and a wake code of LPWR_WAKEUP_UART returns the machine to LPWR_STOP
      * without ever running lpwr_wakeup_cb(). The half then re-enters STOP with
      * no rail re-raise and no matrix re-init: dark and unresponsive (observed on
@@ -258,9 +273,9 @@ bool lpwr_stop_is_allowed(void) {
      *
      * This is a policy, not a statement that no wake source is armed — on both
      * paths the master arms its own rows, the mode-switch pins and the cable
-     * pin. What lower_sleep actually gates is the cross-half column drive, the
+     * pin. What this flag actually gates is the cross-half column drive, the
      * module-sleep command, and the post-stop wake interpretation. */
-    return lpwr_stop_is_allowed_decide(is_keyboard_master(), lower_sleep);
+    return lpwr_stop_is_allowed_decide(is_keyboard_master(), wls_sleep_ordered());
 }
 
 uint32_t lpwr_wakeup_armed_mask(void) {
@@ -279,8 +294,8 @@ void lpwr_stop_hook_post(void) {
      * hook needs to do is drop the board's ordered-sleep flag on a real wake,
      * so the next stop starts unordered. The switch that used to live here
      * predates the wake set and would misread a multi-bit code. */
-    if (lower_sleep && lpwr_get_state() == LPWR_WAKEUP) {
-        lower_sleep = false;
+    if (wls_sleep_ordered() && lpwr_get_state() == LPWR_WAKEUP) {
+        wls_order_sleep(false);
     }
 }
 
