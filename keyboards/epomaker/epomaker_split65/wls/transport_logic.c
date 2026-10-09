@@ -7,8 +7,19 @@
  * file stays free of the firmware include graph (and therefore testable). */
 #define HSM_DEVS_USB 0
 #define HSM_DEVS_BT1 1
+#define HSM_DEVS_BT2 2
+#define HSM_DEVS_BT3 3
 #define HSM_DEVS_BT5 5
 #define HSM_DEVS_2G4 6
+
+/* Wireless keycodes, duplicated from the board's keycode block so this file
+ * stays include-free (and testable). `keyboard.json` declares KC_BT1..KC_BT3 and
+ * KC_2G4 as the first four keyboard keycodes, i.e. QK_KB_0..QK_KB_3 — a fixed,
+ * contiguous range (0x7E00..0x7E03) the generated header preserves. */
+#define HSM_KC_BT1 0x7E00
+#define HSM_KC_BT2 0x7E01
+#define HSM_KC_BT3 0x7E02
+#define HSM_KC_2G4 0x7E03
 
 uint8_t hsm_boot_devs(hsm_switch_pos_t pos, uint8_t last_bt) {
     switch (pos) {
@@ -46,5 +57,22 @@ bool hsm_keycode_allowed(hsm_switch_pos_t pos, uint8_t target_devs) {
             /* Forgiving: the vendor firmware allowed acting without a readable
              * switch; preserve that so a broken switch is not a hard lock. */
             return true;
+    }
+}
+
+int16_t hsm_long_press_devs(uint16_t keycode) {
+    switch (keycode) {
+        case HSM_KC_BT1:
+            return HSM_DEVS_BT1;
+        case HSM_KC_BT2:
+            return HSM_DEVS_BT2;
+        case HSM_KC_BT3:
+            return HSM_DEVS_BT3;
+        case HSM_KC_2G4:
+            return HSM_DEVS_2G4;
+        default:
+            /* No long-press action (includes EE_CLR, which the old handler
+             * matched but deliberately did nothing for). */
+            return -1;
     }
 }

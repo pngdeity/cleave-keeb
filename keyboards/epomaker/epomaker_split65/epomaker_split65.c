@@ -3,6 +3,7 @@
 
 #include QMK_KEYBOARD_H
 #include "wls/wls.h"
+#include "wls/transport_logic.h"
 #include "rgb_record/rgb_record.h"
 #include "quantum.h"
 #include "connection.h"
@@ -423,58 +424,36 @@ void wireless_post_task(void) {
 }
 
 uint32_t wls_process_long_press(uint32_t trigger_time, void *cb_arg) {
-    uint16_t keycode = *((uint16_t *)cb_arg);
+    /* The deferred call carries the *resolved* target device, written once when
+     * the timer was armed. It must not point at shared state: `defer_exec` stores
+     * the pointer, so a pointer into a per-keypress variable would be rewritten
+     * by any later keypress in the 3 s window and could re-pair the wrong
+     * profile (audit fix 1). */
+    uint8_t devs = (uint8_t)(uintptr_t)cb_arg;
 
-    switch (keycode) {
-        case KC_BT1: {
-            uint8_t mode = confinfo.devs;
-            hs_modeio_detection(true, &mode, confinfo.last_btdevs);
-            if ((mode == hs_bt) || (mode == hs_wireless) || (mode == hs_none)) {
-                /* Re-pair the profile the driver already owns (14b): select it
-                 * with reset=true so the module gets CLEAN + devinfo + PAIR. */
-                bluetooth_select_profile(DEVS_BT1, true);
-                wls_indicate_devs(DEVS_BT1, true);
-            }
-
-        } break;
-        case KC_BT2: {
-            uint8_t mode = confinfo.devs;
-            hs_modeio_detection(true, &mode, confinfo.last_btdevs);
-            if ((mode == hs_bt) || (mode == hs_wireless) || (mode == hs_none)) {
-                bluetooth_select_profile(DEVS_BT2, true);
-                wls_indicate_devs(DEVS_BT2, true);
-            }
-        } break;
-        case KC_BT3: {
-            uint8_t mode = confinfo.devs;
-            hs_modeio_detection(true, &mode, confinfo.last_btdevs);
-            if ((mode == hs_bt) || (mode == hs_wireless) || (mode == hs_none)) {
-                bluetooth_select_profile(DEVS_BT3, true);
-                wls_indicate_devs(DEVS_BT3, true);
-            }
-        } break;
-        case KC_2G4: {
-            uint8_t mode = confinfo.devs;
-            hs_modeio_detection(true, &mode, confinfo.last_btdevs);
-            if ((mode == hs_2g4) || (mode == hs_wireless) || (mode == hs_none)) {
-                wireless_devs_change(wireless_get_current_devs(), DEVS_2G4, true);
-                wls_indicate_devs(DEVS_2G4, true);
-            }
-        } break;
-        case EE_CLR: {
-        } break;
-        default:
-            break;
+    if (devs >= DEVS_BT1 && devs <= DEVS_BT5) {
+        uint8_t mode = confinfo.devs;
+        hs_modeio_detection(true, &mode, confinfo.last_btdevs);
+        if ((mode == hs_bt) || (mode == hs_wireless) || (mode == hs_none)) {
+            /* Re-pair the profile the driver already owns (14b): select it with
+             * reset=true so the module gets CLEAN + devinfo + PAIR. */
+            bluetooth_select_profile(devs, true);
+            wls_indicate_devs(devs, true);
+        }
+    } else if (devs == DEVS_2G4) {
+        uint8_t mode = confinfo.devs;
+        hs_modeio_detection(true, &mode, confinfo.last_btdevs);
+        if ((mode == hs_2g4) || (mode == hs_wireless) || (mode == hs_none)) {
+            wireless_devs_change(wireless_get_current_devs(), DEVS_2G4, true);
+            wls_indicate_devs(DEVS_2G4, true);
+        }
     }
 
     return 0;
 }
 
 bool process_record_wls(uint16_t keycode, keyrecord_t *record) {
-    static uint16_t       keycode_shadow               = 0x00;
     static deferred_token wls_process_long_press_token = INVALID_DEFERRED_TOKEN;
-
-    keycode_shadow = keycode;
 
 #    ifndef WLS_KEYCODE_PAIR_TIME
 #        define WLS_KEYCODE_PAIR_TIME 3000
@@ -499,7 +478,9 @@ bool process_record_wls(uint16_t keycode, keyrecord_t *record) {
                 wls_persist_devs();                                                                                                                                    \
                 wls_indicate_devs((wls_dev), false);                                                                                                                   \
                 if (wls_process_long_press_token == INVALID_DEFERRED_TOKEN) {                                                                                          \
-                    wls_process_long_press_token = defer_exec(WLS_KEYCODE_PAIR_TIME, wls_process_long_press, &keycode_shadow);                                         \
+                    /* Capture the resolved target by value, not a pointer into                                                                                        \
+                     * per-keypress state (audit fix 1). */                                                                                                            \
+                    wls_process_long_press_token = defer_exec(WLS_KEYCODE_PAIR_TIME, wls_process_long_press, (void *)(uintptr_t)hsm_long_press_devs(keycode));         \
                 }                                                                                                                                                      \
             } else {                                                                                                                                                   \
                 cancel_deferred_exec(wls_process_long_press_token);                                                                                                    \

@@ -33,3 +33,10 @@ uint8_t hsm_boot_devs(hsm_switch_pos_t pos, uint8_t last_bt);
  * 2.4 GHz key only in the 2.4 GHz position. This keeps a keycode from crossing
  * modes the switch does not allow. */
 bool hsm_keycode_allowed(hsm_switch_pos_t pos, uint8_t target_devs);
+
+/* The device index a wireless keycode re-pairs on a long-press, or -1 when the
+ * keycode has no long-press action. Pure: the keycode alone decides the target,
+ * so the caller can capture the value at arm time instead of holding a pointer
+ * into shared state that every later keypress overwrites (the defect this
+ * encodes against). */
+int16_t hsm_long_press_devs(uint16_t keycode);

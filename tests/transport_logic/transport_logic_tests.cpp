@@ -101,3 +101,19 @@ TEST_F(TransportLogic, keycodes_respect_switch_domain) {
     EXPECT_TRUE(hsm_keycode_allowed(HSM_SWITCH_UNKNOWN, DEVS_BT1));
     EXPECT_TRUE(hsm_keycode_allowed(HSM_SWITCH_UNKNOWN, DEVS_2G4));
 }
+
+/* The long-press re-pair target is decided by the keycode alone, as a pure
+ * function. This is what lets the deferred timer capture a *value* at arm time
+ * instead of a pointer into per-keypress state (audit fix 1). */
+TEST_F(TransportLogic, long_press_target_is_a_keycode_table) {
+    /* Wireless keycodes (KC_BT1..KC_2G4 = QK_KB_0..QK_KB_3) map to their device. */
+    EXPECT_EQ(DEVS_BT1, hsm_long_press_devs(0x7E00));
+    EXPECT_EQ(DEVS_BT2, hsm_long_press_devs(0x7E01));
+    EXPECT_EQ(DEVS_BT3, hsm_long_press_devs(0x7E02));
+    EXPECT_EQ(DEVS_2G4, hsm_long_press_devs(0x7E03));
+
+    /* Anything else has no long-press action. */
+    EXPECT_EQ(-1, hsm_long_press_devs(0x0000));
+    EXPECT_EQ(-1, hsm_long_press_devs(0x0004)); /* KC_A */
+    EXPECT_EQ(-1, hsm_long_press_devs(0x7E10)); /* a different keyboard keycode */
+}
