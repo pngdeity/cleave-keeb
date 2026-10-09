@@ -27,6 +27,18 @@ static void kb_battery_send(const kb_battery_snapshot_t *snap) {
     buf[KB_BATTERY_IDX_CHARGE]    = snap->charge;
     buf[KB_BATTERY_IDX_TRANSPORT] = snap->transport;
     buf[KB_BATTERY_IDX_MODEL]     = KB_BATTERY_MODEL_ID;
+
+    /* Selector readback (items 14b/14c): the persisted host and the BT driver's
+     * active profile. `connection_get_host_raw()` is the stored value (not the
+     * AUTO-resolved one) so a client can see what persistence holds. */
+    buf[KB_BATTERY_IDX_HOST]  = (uint8_t)connection_get_host_raw();
+    buf[KB_BATTERY_IDX_BTSUB] = bluetooth_get_profile();
+
+    /* Module fingerprint: fw version (`0x5D`) and link state (`0x5B`). These
+     * identify the closed module image that carries the Bluetooth faults. */
+    buf[KB_BATTERY_IDX_MD_VERSION] = md_get_version();
+    buf[KB_BATTERY_IDX_MD_STATE]   = *md_getp_state();
+
     replaced_hid_send(buf, RAW_EPSIZE);
 }
 

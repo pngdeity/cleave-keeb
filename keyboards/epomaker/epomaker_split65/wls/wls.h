@@ -66,6 +66,14 @@ uint8_t bluetooth_get_profile(void);
 #define KB_BATTERY_IDX_HOST   7
 #define KB_BATTERY_IDX_BTSUB  8
 
+/* Module fingerprint (see docs/PROTOCOL.md). The CH582F module is the source of
+ * the Bluetooth faults and its image is closed and undumpable, so its identity
+ * is worth reporting: index 9 = the module firmware version (`0x5D`, 0 if the
+ * image does not answer that query), index 10 = the module link state (`0x5B`
+ * sub-code range, i.e. the MD_STATE_* value). Read-only diagnostics. */
+#define KB_BATTERY_IDX_MD_VERSION 9
+#define KB_BATTERY_IDX_MD_STATE   10
+
 /* KB_BATTERY_IDX_CHARGE */
 enum kb_battery_charge {
     KB_BATTERY_CHARGE_DISCHARGING = 0,
