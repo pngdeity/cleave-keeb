@@ -72,7 +72,7 @@ bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev) {
          * indicator fires here and nowhere a re-assert could reach (defect:
          * see `wls_indicate_devs()`). */
         wls_indicate_devs(wireless_get_current_devs(), false);
-        hs_rgb_blink_set_timer(timer_read32());
+        hs_link_activity();
         suspend_wakeup_init();
         return true;
     }
@@ -109,7 +109,8 @@ uint8_t hs_mode_switch_devs(uint8_t lsat_btdev) {
 #endif
 }
 
-static uint32_t hs_linker_rgb_timer = 0x00;
+static hsm_link_timers_t hs_link_timers = {0, 0};
+static uint8_t           hs_link_last_status;
 
 bool hs_mode_scan(bool update, uint8_t moude, uint8_t lsat_btdev) {
     if (hs_modeio_detection(update, &moude, lsat_btdev)) {
@@ -119,54 +120,58 @@ bool hs_mode_scan(bool update, uint8_t moude, uint8_t lsat_btdev) {
     return false;
 }
 
-void hs_rgb_blink_set_timer(uint32_t time) {
-    hs_linker_rgb_timer = time;
+/* Map the module's MD_STATE_* onto the pure core's link-state enum. */
+static hsm_link_state_t hs_link_state(void) {
+    switch (*md_getp_state()) {
+        case MD_STATE_PAIRING:
+            return HSM_LINK_PAIRING;
+        case MD_STATE_CONNECTED:
+            return HSM_LINK_CONNECTED;
+        case MD_STATE_DISCONNECTED:
+            return HSM_LINK_DISCONNECTED;
+        case MD_STATE_REJECT:
+            return HSM_LINK_REJECT;
+        case MD_STATE_NONE:
+        default:
+            return HSM_LINK_NONE;
+    }
 }
 
-uint32_t hs_rgb_blink_get_timer(void) {
-    return hs_linker_rgb_timer;
+/* Restart the active link countdown from now (an activity event). The policy is
+ * the pure `hsm_link_restart`; this only supplies `now`, the timeouts, and the
+ * timers store. */
+void hs_link_activity(void) {
+    hsm_link_restart(hs_link_state(), timer_read32(), HS_LBACK_TIMEOUT, HS_SLEEP_TIMEOUT, &hs_link_timers);
 }
 
 bool hs_rgb_blink_hook() {
-    static uint8_t last_status;
-
     if (!is_keyboard_master()) {
         return false;
     }
 
-    if (last_status != *md_getp_state()) {
-        last_status = *md_getp_state();
-        hs_rgb_blink_set_timer(0x00);
-    }
+    hsm_link_state_t state         = hs_link_state();
+    bool             state_changed = (hs_link_last_status != (uint8_t)state);
+    hs_link_last_status            = (uint8_t)state;
 
-    switch (*md_getp_state()) {
-        case MD_STATE_NONE: {
-            hs_rgb_blink_set_timer(0x00);
-        } break;
+    /* The whole reconnect/sleep policy is a pure decision; this shell only
+     * performs the returned action. Two independent deadlines live in
+     * `hs_link_timers` (see transport_logic), never one shared timestamp. */
+    hsm_link_action_t action = hsm_link_watch(state, state_changed, timer_read32(), HS_LBACK_TIMEOUT, HS_SLEEP_TIMEOUT, &hs_link_timers);
 
-        case MD_STATE_DISCONNECTED:
-            if (hs_rgb_blink_get_timer() == 0x00) {
-                hs_rgb_blink_set_timer(timer_read32());
-            } else {
-                if (timer_elapsed32(hs_rgb_blink_get_timer()) >= HS_LBACK_TIMEOUT) {
-                    hs_rgb_blink_set_timer(timer_read32());
-                    md_send_devctrl(MD_SND_CMD_DEVCTRL_USB);
-                    wait_ms(200);
-                    lpwr_set_timeout_manual(true);
-                }
-            }
-        case MD_STATE_CONNECTED:
-            if (hs_rgb_blink_get_timer() == 0x00) {
-                hs_rgb_blink_set_timer(timer_read32());
-            } else {
-                if (timer_elapsed32(hs_rgb_blink_get_timer()) >= HS_SLEEP_TIMEOUT) {
-                    hs_rgb_blink_set_timer(timer_read32());
-                    lpwr_set_timeout_manual(true);
-                }
-            }
+    switch (action) {
+        case HSM_LINK_ACT_RECONNECT:
+            md_send_devctrl(MD_SND_CMD_DEVCTRL_USB);
+            wait_ms(200);
+            lpwr_set_timeout_manual(true);
+            break;
+        case HSM_LINK_ACT_SLEEP:
+            lpwr_set_timeout_manual(true);
+            break;
+        case HSM_LINK_ACT_NONE:
         default:
             break;
     }
+
     return true;
 }
 

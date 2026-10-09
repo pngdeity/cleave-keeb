@@ -57,3 +57,61 @@ uint8_t hsm_seed_btdev(uint8_t current_devs, uint8_t last_bt);
  * but named so the intent ("seed the edge-detector with the live truth, not a
  * persisted copy") is explicit and testable. */
 uint8_t hsm_mode_seed(uint8_t current_devs);
+
+/* ---------------------------------------------------------------------------
+ * Link watch: the reconnect/sleep countdowns, as a pure decision.
+ *
+ * The board runs one periodic watch over the module link state and, on two
+ * *different* timeouts, either pokes the module to reconnect or orders the half
+ * to sleep. Historically a single RAM timestamp served both meanings and was
+ * interpreted in one fall-through pass, so the two countdowns could not be
+ * reasoned about independently (the "two-cadence" smell).
+ *
+ * The model here is explicit: state carries two *deadlines* (absolute, in the
+ * caller's timer units; 0 means "unarmed"), and this function is the only place
+ * that reads them. It is pure — it takes `now` and the deadlines, returns the
+ * single action to perform and the deadlines to store back — so the shell holds
+ * no policy.
+ * ------------------------------------------------------------------------- */
+
+/* The link state the watch keys on, mirroring the module's MD_STATE_* (and a
+ * NONE for "no link machine active"). Kept as its own enum so this pure core
+ * has no firmware include graph. */
+typedef enum {
+    HSM_LINK_NONE = 0,
+    HSM_LINK_PAIRING,
+    HSM_LINK_CONNECTED,
+    HSM_LINK_DISCONNECTED,
+    HSM_LINK_REJECT,
+} hsm_link_state_t;
+
+/* What the watch should do this tick. Exactly one action per tick. */
+typedef enum {
+    HSM_LINK_ACT_NONE = 0,  /* nothing to do */
+    HSM_LINK_ACT_RECONNECT, /* the disconnected countdown elapsed: poke the module */
+    HSM_LINK_ACT_SLEEP,     /* the connected countdown elapsed: order sleep */
+} hsm_link_action_t;
+
+/* The watch's whole state: two independent deadlines, in the caller's timer
+ * units. A deadline of 0 means unarmed. */
+typedef struct {
+    uint32_t reconnect_at; /* when a DISCONNECTED link should be re-poked */
+    uint32_t sleep_at;     /* when a CONNECTED link should be ordered to sleep */
+} hsm_link_timers_t;
+
+/* Advance the link watch by one tick.
+ *
+ * `now` is the current time in the caller's units (e.g. `timer_read32()`).
+ * `state_changed` is true on the first tick after the link state changed; it
+ * restarts the active countdown from `now`.
+ *
+ * Returns the single action to perform and, via `*timers`, the deadlines to
+ * store back. Pure: same inputs, same outputs. The caller (the shell) performs
+ * the returned action and persists `*timers`. */
+hsm_link_action_t hsm_link_watch(hsm_link_state_t state, bool state_changed, uint32_t now, uint32_t reconnect_timeout, uint32_t sleep_timeout, hsm_link_timers_t *timers);
+
+/* Restart the active countdown from `now` (an activity event: a keypress, a
+ * wake, a re-pair). Only the deadline belonging to `state` is touched; the
+ * other stays cleared, so activity cannot arm a countdown for a state we are
+ * not in. Pure; the shell stores the result. */
+void hsm_link_restart(hsm_link_state_t state, uint32_t now, uint32_t reconnect_timeout, uint32_t sleep_timeout, hsm_link_timers_t *timers);

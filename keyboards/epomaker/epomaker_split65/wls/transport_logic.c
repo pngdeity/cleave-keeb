@@ -101,3 +101,63 @@ uint8_t hsm_mode_seed(uint8_t current_devs) {
      * authority, never a persisted copy") is explicit and testable. */
     return current_devs;
 }
+
+/* True when an absolute deadline (`at`, 0 = unarmed) has been reached at `now`.
+ * Signed difference so a 32-bit timer wrap is handled the way `timer_elapsed32`
+ * does. */
+static bool hsm_deadline_reached(uint32_t at, uint32_t now) {
+    return at != 0 && (int32_t)(now - at) >= 0;
+}
+
+void hsm_link_restart(hsm_link_state_t state, uint32_t now, uint32_t reconnect_timeout, uint32_t sleep_timeout, hsm_link_timers_t *timers) {
+    /* Activity starts the countdown for the state we are in, and clears the
+     * other state's deadline (it does not apply). This is the pure form of the
+     * old "hs_rgb_blink_set_timer(timer_read32())" activity reset, but scoped to
+     * the active countdown so one event cannot arm a foreign timer. */
+    timers->reconnect_at = (state == HSM_LINK_DISCONNECTED) ? now + reconnect_timeout : 0;
+    timers->sleep_at     = (state == HSM_LINK_CONNECTED) ? now + sleep_timeout : 0;
+}
+
+hsm_link_action_t hsm_link_watch(hsm_link_state_t state, bool state_changed, uint32_t now, uint32_t reconnect_timeout, uint32_t sleep_timeout, hsm_link_timers_t *timers) {
+    /* A deadline is meaningful only for its own state; a deadline left over from
+     * a state we have left would be a latent second meaning, so clear the ones
+     * that do not apply. */
+    if (state != HSM_LINK_DISCONNECTED) {
+        timers->reconnect_at = 0;
+    }
+    if (state != HSM_LINK_CONNECTED) {
+        timers->sleep_at = 0;
+    }
+
+    switch (state) {
+        case HSM_LINK_DISCONNECTED: {
+            /* Arm on entry (or first tick after a change); then a reached
+             * deadline pokes the module to reconnect and re-arms. */
+            if (state_changed || timers->reconnect_at == 0) {
+                timers->reconnect_at = now + reconnect_timeout;
+                return HSM_LINK_ACT_NONE;
+            }
+            if (hsm_deadline_reached(timers->reconnect_at, now)) {
+                timers->reconnect_at = now + reconnect_timeout;
+                return HSM_LINK_ACT_RECONNECT;
+            }
+            return HSM_LINK_ACT_NONE;
+        }
+        case HSM_LINK_CONNECTED: {
+            if (state_changed || timers->sleep_at == 0) {
+                timers->sleep_at = now + sleep_timeout;
+                return HSM_LINK_ACT_NONE;
+            }
+            if (hsm_deadline_reached(timers->sleep_at, now)) {
+                timers->sleep_at = now + sleep_timeout;
+                return HSM_LINK_ACT_SLEEP;
+            }
+            return HSM_LINK_ACT_NONE;
+        }
+        case HSM_LINK_NONE:
+        case HSM_LINK_PAIRING:
+        case HSM_LINK_REJECT:
+        default:
+            return HSM_LINK_ACT_NONE;
+    }
+}

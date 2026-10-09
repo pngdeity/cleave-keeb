@@ -37,7 +37,10 @@ bool hs_rgb_blink_hook(void);
 bool hs_mode_scan(bool update, uint8_t moude, uint8_t lsat_btdev);
 bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev);
 uint8_t hs_mode_switch_devs(uint8_t lsat_btdev);
-void hs_rgb_blink_set_timer(uint32_t time);
+/* Restart the active link countdown (reconnect/sleep) from now, on an activity
+ * event such as a keypress or wake. The countdown's policy lives in the pure
+ * `hsm_link_watch`; this is only the store-back shell. */
+void hs_link_activity(void);
 bool hs_transport_arbitrate_cable(bool cable_present, bool prev_present);
 void wls_persist_devs(void);
 void wls_led_rail_apply(void);

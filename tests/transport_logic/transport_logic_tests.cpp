@@ -163,3 +163,51 @@ TEST_F(TransportLogic, bt_seed_prefers_live_index_and_clamps_fallback) {
     EXPECT_EQ(DEVS_BT1, hsm_seed_btdev(DEVS_USB, DEVS_2G4));
     EXPECT_EQ(DEVS_BT1, hsm_seed_btdev(DEVS_2G4, 0xFF));
 }
+
+/* The link watch has two independent countdowns: a DISCONNECTED link re-pokes
+ * the module after `reconnect_timeout`, a CONNECTED link orders sleep after
+ * `sleep_timeout`. They must never share a deadline: a value that means "poke"
+ * in one state cannot mean "sleep" in another. Each state's deadline is cleared
+ * when that state is not current, so a stale deadline cannot fire late. */
+TEST_F(TransportLogic, link_watch_uses_independent_deadlines) {
+    hsm_link_timers_t t;
+    const uint32_t    RECONNECT = 30000, SLEEP = 60000;
+
+    /* DISCONNECTED: arms on entry, then fires reconnect exactly at the timeout. */
+    t = {0, 0};
+    EXPECT_EQ(HSM_LINK_ACT_NONE, hsm_link_watch(HSM_LINK_DISCONNECTED, true, 1000, RECONNECT, SLEEP, &t));
+    EXPECT_EQ(31000u, t.reconnect_at);
+    EXPECT_EQ(0u, t.sleep_at); /* the sleep deadline is not this state's */
+    EXPECT_EQ(HSM_LINK_ACT_NONE, hsm_link_watch(HSM_LINK_DISCONNECTED, false, 30000, RECONNECT, SLEEP, &t));
+    EXPECT_EQ(HSM_LINK_ACT_RECONNECT, hsm_link_watch(HSM_LINK_DISCONNECTED, false, 31000, RECONNECT, SLEEP, &t));
+    /* re-armed after firing */
+    EXPECT_EQ(61000u, t.reconnect_at);
+
+    /* CONNECTED: independent deadline, same shape. */
+    t = {0, 0};
+    EXPECT_EQ(HSM_LINK_ACT_NONE, hsm_link_watch(HSM_LINK_CONNECTED, true, 1000, RECONNECT, SLEEP, &t));
+    EXPECT_EQ(61000u, t.sleep_at);
+    EXPECT_EQ(0u, t.reconnect_at);
+    EXPECT_EQ(HSM_LINK_ACT_SLEEP, hsm_link_watch(HSM_LINK_CONNECTED, false, 61000, RECONNECT, SLEEP, &t));
+}
+
+/* A state change restarts the active countdown, and leaving a state clears its
+ * deadline so it cannot fire late under the next state's meaning. */
+TEST_F(TransportLogic, link_watch_clears_foreign_deadlines) {
+    hsm_link_timers_t t         = {0, 0};
+    const uint32_t    RECONNECT = 30000, SLEEP = 60000;
+
+    /* Arm a reconnect deadline... */
+    hsm_link_watch(HSM_LINK_DISCONNECTED, true, 1000, RECONNECT, SLEEP, &t);
+    EXPECT_NE(0u, t.reconnect_at);
+
+    /* ...then leave DISCONNECTED: the reconnect deadline must be cleared. */
+    EXPECT_EQ(HSM_LINK_ACT_NONE, hsm_link_watch(HSM_LINK_CONNECTED, true, 5000, RECONNECT, SLEEP, &t));
+    EXPECT_EQ(0u, t.reconnect_at);
+
+    /* States with no countdown clear both. */
+    t = {123, 456};
+    EXPECT_EQ(HSM_LINK_ACT_NONE, hsm_link_watch(HSM_LINK_NONE, false, 9, RECONNECT, SLEEP, &t));
+    EXPECT_EQ(0u, t.reconnect_at);
+    EXPECT_EQ(0u, t.sleep_at);
+}

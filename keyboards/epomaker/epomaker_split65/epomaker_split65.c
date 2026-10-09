@@ -295,7 +295,7 @@ void suspend_wakeup_init_kb(void) {
 
     wireless_devs_change(wireless_get_current_devs(), wireless_get_current_devs(), false);
     suspend_wakeup_init_user();
-    hs_rgb_blink_set_timer(timer_read32());
+    hs_link_activity();
 }
 
 void suspend_wakeup_init_user(void) {
@@ -494,7 +494,7 @@ bool process_record_wls(uint16_t keycode, keyrecord_t *record) {
             hs_modeio_detection(true, &mode, hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
             if ((mode == hs_bt) || (mode == hs_wireless) || (mode == hs_none)) {
                 WLS_KEYCODE_EXEC(DEVS_BT1);
-                hs_rgb_blink_set_timer(timer_read32());
+                hs_link_activity();
             }
 
         } break;
@@ -503,7 +503,7 @@ bool process_record_wls(uint16_t keycode, keyrecord_t *record) {
             hs_modeio_detection(true, &mode, hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
             if ((mode == hs_bt) || (mode == hs_wireless) || (mode == hs_none)) {
                 WLS_KEYCODE_EXEC(DEVS_BT2);
-                hs_rgb_blink_set_timer(timer_read32());
+                hs_link_activity();
             }
         } break;
         case KC_BT3: {
@@ -511,7 +511,7 @@ bool process_record_wls(uint16_t keycode, keyrecord_t *record) {
             hs_modeio_detection(true, &mode, hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
             if ((mode == hs_bt) || (mode == hs_wireless) || (mode == hs_none)) {
                 WLS_KEYCODE_EXEC(DEVS_BT3);
-                hs_rgb_blink_set_timer(timer_read32());
+                hs_link_activity();
             }
         } break;
         case KC_2G4: {
@@ -519,7 +519,7 @@ bool process_record_wls(uint16_t keycode, keyrecord_t *record) {
             hs_modeio_detection(true, &mode, hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
             if ((mode == hs_2g4) || (mode == hs_wireless) || (mode == hs_none)) {
                 WLS_KEYCODE_EXEC(DEVS_2G4);
-                hs_rgb_blink_set_timer(timer_read32());
+                hs_link_activity();
             }
         } break;
 
@@ -538,7 +538,7 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
     }
 
     if (*md_getp_state() == MD_STATE_CONNECTED) {
-        hs_rgb_blink_set_timer(timer_read32());
+        hs_link_activity();
     }
 
     switch (keycode) {
@@ -1750,7 +1750,7 @@ void hs_reset_settings(void) {
     if (hs_reset_settings_user() != true) {
         return;
     }
-    hs_rgb_blink_set_timer(timer_read32());
+    hs_link_activity();
     keyboard_post_init_kb();
 }
 
