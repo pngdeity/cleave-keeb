@@ -119,6 +119,7 @@ bool md_receive_process_user(uint8_t *pdata, uint8_t len);
 void md_devs_change(uint8_t devs, bool reset);
 bool md_inquire_bat(void);
 uint8_t md_get_version(void);
+void md_devs_changed(void);
 uint8_t *md_getp_state(void);
 uint8_t *md_getp_bat(void);
 uint8_t *md_getp_indicator(void);

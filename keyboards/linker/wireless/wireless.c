@@ -201,8 +201,7 @@ void wireless_devs_change(uint8_t old_devs, uint8_t new_devs, bool reset) {
      * (item 14d). This function's job is only the vendor device index and the
      * module-facing change. */
     if ((wls_devs != new_devs) || reset) {
-        *md_getp_state()     = MD_STATE_DISCONNECTED;
-        *md_getp_indicator() = 0;
+        md_devs_changed();
     }
 
     wls_devs = new_devs;

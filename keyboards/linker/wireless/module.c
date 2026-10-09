@@ -300,6 +300,16 @@ uint8_t *md_getp_state(void) {
     return &md_info.state;
 }
 
+/* The module owns its link state; the rest of the stack only reads it. When the
+ * device index changes we have asked the module to move to another profile, so
+ * the last link report is stale until the module reports again. This is the one
+ * place that transition is expressed, so no caller reaches into the register. */
+void md_devs_changed(void) {
+
+    md_info.state     = MD_STATE_DISCONNECTED;
+    md_info.indicator = 0;
+}
+
 uint8_t *md_getp_bat(void) {
 
     return &md_info.bat;
