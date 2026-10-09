@@ -46,3 +46,14 @@ int16_t hsm_long_press_devs(uint16_t keycode);
  * authority — rather than kept in a second variable that can desync and then
  * lie in the battery readback. */
 uint8_t hsm_profile_of_devs(uint8_t devs);
+
+/* The BT sub-selection to seed the mode scan with: the current device index when
+ * it is already on a BT profile, otherwise the persisted fallback (`last_bt`).
+ * This lets callers seed from the *live* authority (`wireless_get_current_devs()`)
+ * rather than a RAM mirror of the persisted index. */
+uint8_t hsm_seed_btdev(uint8_t current_devs, uint8_t last_bt);
+
+/* The mode seed for the switch scan, from the live device index. Identity today,
+ * but named so the intent ("seed the edge-detector with the live truth, not a
+ * persisted copy") is explicit and testable. */
+uint8_t hsm_mode_seed(uint8_t current_devs);

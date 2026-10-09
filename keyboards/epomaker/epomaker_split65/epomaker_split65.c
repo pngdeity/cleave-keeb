@@ -371,7 +371,7 @@ bool lpwr_is_allow_presleep_hook(void) {
             dprint("Slave sync failed!\n");
         }
 
-        if (confinfo.devs != DEVS_USB) {
+        if (wireless_get_current_devs() != DEVS_USB) {
             palSetLineMode(SERIAL_USART_RX_PIN, PAL_OUTPUT_TYPE_OPENDRAIN);
             palSetLineMode(SERIAL_USART_TX_PIN, PAL_OUTPUT_TYPE_OPENDRAIN);
         }
@@ -417,7 +417,7 @@ void wireless_post_task(void) {
         post_init_timer = 0x00;
     }
 #    if defined(HS_BT_DEF_PIN) && defined(HS_2G4_DEF_PIN)
-    hs_mode_scan(false, confinfo.devs, confinfo.last_btdevs);
+    hs_mode_scan(false, hsm_mode_seed(wireless_get_current_devs()), hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
 #    endif
 
     kb_battery_push_task();
@@ -432,8 +432,8 @@ uint32_t wls_process_long_press(uint32_t trigger_time, void *cb_arg) {
     uint8_t devs = (uint8_t)(uintptr_t)cb_arg;
 
     if (devs >= DEVS_BT1 && devs <= DEVS_BT5) {
-        uint8_t mode = confinfo.devs;
-        hs_modeio_detection(true, &mode, confinfo.last_btdevs);
+        uint8_t mode = hsm_mode_seed(wireless_get_current_devs());
+        hs_modeio_detection(true, &mode, hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
         if ((mode == hs_bt) || (mode == hs_wireless) || (mode == hs_none)) {
             /* Re-pair the profile the driver already owns (14b): select it with
              * reset=true so the module gets CLEAN + devinfo + PAIR. */
@@ -441,8 +441,8 @@ uint32_t wls_process_long_press(uint32_t trigger_time, void *cb_arg) {
             wls_indicate_devs(devs, true);
         }
     } else if (devs == DEVS_2G4) {
-        uint8_t mode = confinfo.devs;
-        hs_modeio_detection(true, &mode, confinfo.last_btdevs);
+        uint8_t mode = hsm_mode_seed(wireless_get_current_devs());
+        hs_modeio_detection(true, &mode, hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
         if ((mode == hs_2g4) || (mode == hs_wireless) || (mode == hs_none)) {
             wireless_devs_change(wireless_get_current_devs(), DEVS_2G4, true);
             wls_indicate_devs(DEVS_2G4, true);
@@ -490,8 +490,8 @@ bool process_record_wls(uint16_t keycode, keyrecord_t *record) {
 
     switch (keycode) {
         case KC_BT1: {
-            uint8_t mode = confinfo.devs;
-            hs_modeio_detection(true, &mode, confinfo.last_btdevs);
+            uint8_t mode = hsm_mode_seed(wireless_get_current_devs());
+            hs_modeio_detection(true, &mode, hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
             if ((mode == hs_bt) || (mode == hs_wireless) || (mode == hs_none)) {
                 WLS_KEYCODE_EXEC(DEVS_BT1);
                 hs_rgb_blink_set_timer(timer_read32());
@@ -499,24 +499,24 @@ bool process_record_wls(uint16_t keycode, keyrecord_t *record) {
 
         } break;
         case KC_BT2: {
-            uint8_t mode = confinfo.devs;
-            hs_modeio_detection(true, &mode, confinfo.last_btdevs);
+            uint8_t mode = hsm_mode_seed(wireless_get_current_devs());
+            hs_modeio_detection(true, &mode, hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
             if ((mode == hs_bt) || (mode == hs_wireless) || (mode == hs_none)) {
                 WLS_KEYCODE_EXEC(DEVS_BT2);
                 hs_rgb_blink_set_timer(timer_read32());
             }
         } break;
         case KC_BT3: {
-            uint8_t mode = confinfo.devs;
-            hs_modeio_detection(true, &mode, confinfo.last_btdevs);
+            uint8_t mode = hsm_mode_seed(wireless_get_current_devs());
+            hs_modeio_detection(true, &mode, hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
             if ((mode == hs_bt) || (mode == hs_wireless) || (mode == hs_none)) {
                 WLS_KEYCODE_EXEC(DEVS_BT3);
                 hs_rgb_blink_set_timer(timer_read32());
             }
         } break;
         case KC_2G4: {
-            uint8_t mode = confinfo.devs;
-            hs_modeio_detection(true, &mode, confinfo.last_btdevs);
+            uint8_t mode = hsm_mode_seed(wireless_get_current_devs());
+            hs_modeio_detection(true, &mode, hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
             if ((mode == hs_2g4) || (mode == hs_wireless) || (mode == hs_none)) {
                 WLS_KEYCODE_EXEC(DEVS_2G4);
                 hs_rgb_blink_set_timer(timer_read32());
@@ -1230,7 +1230,7 @@ bool     process_record_kb(uint16_t keycode, keyrecord_t *record) {
         } break;
         case HS_BATQ: {
             extern bool rk_bat_req_flag;
-            rk_bat_req_flag = (confinfo.devs != DEVS_USB) && record->event.pressed;
+            rk_bat_req_flag = (wireless_get_current_devs() != DEVS_USB) && record->event.pressed;
             return false;
         } break;
 
@@ -1322,34 +1322,27 @@ void rgb_matrix_wls_indicator_set(uint8_t index, RGB rgb, uint32_t interval, uin
     wls_rgb_indicator_rgb      = rgb;
 }
 
+/* The user's explicit transport intent is the only thing that may touch the
+ * persisted index, and it is recorded solely by `wls_persist_devs()` on the
+ * keycode path. The vendor `wireless_devs_change_kb()` hook is deliberately
+ * *not* overridden: it fires for every device-index change including periodic
+ * re-asserts, so anything written there would be committed by an unrelated
+ * whole-struct persist (`KC_FILP`) and could resurrect a stale index at boot
+ * (the defect-4 family). The live authority is `wireless_get_current_devs()`;
+ * `confinfo.devs`/`.last_btdevs` are persisted intent only. */
+
 /* Persist the user's explicit transport choice. Called only from the keycode
- * path (never from the change hook), so the switch stays level-authoritative and
- * a reboot cannot resurrect a stale wireless index (defect 4). Stores both the
- * vendor device index and the BT sub-profile the switch cannot express. */
+ * path, so the switch stays level-authoritative and a reboot cannot resurrect a
+ * stale wireless index (defect 4). Records the vendor device index and the BT
+ * sub-profile the switch cannot express; the values are decided by the pure
+ * core so the rule is testable. */
 void wls_persist_devs(void) {
-    confinfo.devs = wireless_get_current_devs();
-    if (confinfo.devs >= DEVS_BT1 && confinfo.devs <= DEVS_BT3) {
-        confinfo.last_btdevs = confinfo.devs;
+    uint8_t devs  = wireless_get_current_devs();
+    confinfo.devs = devs;
+    if (devs >= DEVS_BT1 && devs <= DEVS_BT5) {
+        confinfo.last_btdevs = devs;
     }
     eeconfig_confinfo_update(confinfo.raw);
-}
-
-/* Bookkeeping only (defect: see `wls_indicate_devs()`). This hook fires for
- * every device-index change *and* for periodic re-asserts (the master's 2 s
- * sync, the disconnected-retry, the indicator callback), so it must not have a
- * visible effect: a transient flash welded here fires on non-events and blinks
- * a half on a clock. Its sole job is to mirror the vendor device index into
- * `confinfo` (RAM); the user-visible confirmation is `wls_indicate_devs()`,
- * called only on a real transition. */
-void wireless_devs_change_kb(uint8_t old_devs, uint8_t new_devs, bool reset) {
-    (void)old_devs;
-    (void)new_devs;
-    (void)reset;
-
-    if (confinfo.devs != wireless_get_current_devs()) {
-        confinfo.devs = wireless_get_current_devs();
-        if (confinfo.devs > 0 && confinfo.devs < 4) confinfo.last_btdevs = confinfo.devs;
-    }
 }
 
 /* The user-visible transport confirmation: flash the selected channel's LED
@@ -1762,7 +1755,7 @@ void hs_reset_settings(void) {
 }
 
 void lpwr_wakeup_hook(void) {
-    hs_mode_scan(false, confinfo.devs, confinfo.last_btdevs);
+    hs_mode_scan(false, hsm_mode_seed(wireless_get_current_devs()), hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
 
     /* If the board woke up with the USB cable attached, switch onto USB and
      * remember the wireless transport it came from. Shared with
@@ -1783,7 +1776,7 @@ void user_sync_mms_slave_handler(uint8_t in_buflen, const void *in_data, uint8_t
             s2m->resp = 0x00;
             break;
         case 0xAA:
-            if (confinfo.devs != DEVS_USB) {
+            if (wireless_get_current_devs() != DEVS_USB) {
                 palSetLineMode(SERIAL_USART_RX_PIN, PAL_OUTPUT_TYPE_OPENDRAIN);
                 palSetLineMode(SERIAL_USART_TX_PIN, PAL_OUTPUT_TYPE_OPENDRAIN);
             }

@@ -43,13 +43,13 @@ void bluetooth_select_profile(uint8_t profile, bool reset) {
     }
 
     /* Change the *device index*, not a cached profile. `wireless_devs_change()`
-     * sets `wls_devs` (so `wireless_get_current_devs()` — and therefore the
-     * profile this driver reports — follows the profile), resets the module link
-     * state, pushes the profile to the module via `md_devs_change()`, and drives
-     * the indicator through `wireless_devs_change_kb()`. Calling `md_devs_change()`
-     * directly (as this once did) told the module but left `wls_devs` on the old
-     * profile, so the left-half LED kept blinking the original profile (BT1 → Q)
-     * forever — the selection was invisible and unobservable.
+     * sets `wls_devs`, resets the module link state, and pushes the profile to
+     * the module via `md_devs_change()`. `wireless_get_current_devs()` is then
+     * the single authority, and the profile this driver reports is derived from
+     * it (`hsm_profile_of_devs`). Calling `md_devs_change()` directly (as this
+     * once did) told the module but left `wls_devs` on the old profile, so the
+     * left-half LED kept blinking the original profile (BT1 → Q) forever — the
+     * selection was invisible and unobservable.
      *
      * `reset` preserves the vendor distinction: false = select the profile,
      * true = re-pair it (CLEAN + devinfo + PAIR on the module). A short keycode

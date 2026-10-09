@@ -139,3 +139,27 @@ TEST_F(TransportLogic, bt_profile_is_a_pure_function_of_the_device_index) {
         EXPECT_EQ(d, hsm_profile_of_devs(d));
     }
 }
+
+/* The mode scan seeds from the *live* device index, never a RAM mirror of the
+ * persisted one (audit fix 3). `hsm_mode_seed` is the identity by contract, and
+ * `hsm_seed_btdev` prefers the live index when it is on a BT profile, falling
+ * back to the clamped persisted BT index otherwise. */
+TEST_F(TransportLogic, mode_seed_is_the_live_device_index) {
+    for (uint8_t d = DEVS_USB; d <= DEVS_2G4; d++) {
+        EXPECT_EQ(d, hsm_mode_seed(d));
+    }
+}
+
+TEST_F(TransportLogic, bt_seed_prefers_live_index_and_clamps_fallback) {
+    /* On a BT profile the live index IS the sub-selection. */
+    EXPECT_EQ(DEVS_BT4, hsm_seed_btdev(DEVS_BT4, DEVS_BT2));
+
+    /* Off a BT profile the persisted last-BT index is the fallback. */
+    EXPECT_EQ(DEVS_BT3, hsm_seed_btdev(DEVS_USB, DEVS_BT3));
+    EXPECT_EQ(DEVS_BT5, hsm_seed_btdev(DEVS_2G4, DEVS_BT5));
+
+    /* A corrupt fallback clamps into BT1..5 rather than leaking USB/2.4G. */
+    EXPECT_EQ(DEVS_BT1, hsm_seed_btdev(DEVS_USB, DEVS_USB));
+    EXPECT_EQ(DEVS_BT1, hsm_seed_btdev(DEVS_USB, DEVS_2G4));
+    EXPECT_EQ(DEVS_BT1, hsm_seed_btdev(DEVS_2G4, 0xFF));
+}

@@ -83,3 +83,21 @@ int16_t hsm_long_press_devs(uint16_t keycode) {
             return -1;
     }
 }
+
+uint8_t hsm_seed_btdev(uint8_t current_devs, uint8_t last_bt) {
+    /* On a BT profile the live device index is the sub-selection; otherwise the
+     * switch is not on BT, so fall back to the persisted last BT index (clamped
+     * to the BT range). This is what lets the scan seed from the *live* device
+     * index instead of a RAM mirror of the stored one. */
+    if (current_devs >= HSM_DEVS_BT1 && current_devs <= HSM_DEVS_BT5) {
+        return current_devs;
+    }
+    return (last_bt >= HSM_DEVS_BT1 && last_bt <= HSM_DEVS_BT5) ? last_bt : HSM_DEVS_BT1;
+}
+
+uint8_t hsm_mode_seed(uint8_t current_devs) {
+    /* The device index *is* the seed the mode scan compares against, so this is
+     * the identity — named so the intent ("seed the edge-detector with the live
+     * authority, never a persisted copy") is explicit and testable. */
+    return current_devs;
+}

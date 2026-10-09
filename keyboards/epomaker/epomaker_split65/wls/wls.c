@@ -147,8 +147,6 @@ bool hs_rgb_blink_hook() {
         case MD_STATE_DISCONNECTED:
             if (hs_rgb_blink_get_timer() == 0x00) {
                 hs_rgb_blink_set_timer(timer_read32());
-                extern void wireless_devs_change_kb(uint8_t old_devs, uint8_t new_devs, bool reset);
-                wireless_devs_change_kb(wireless_get_current_devs(), wireless_get_current_devs(), false);
             } else {
                 if (timer_elapsed32(hs_rgb_blink_get_timer()) >= HS_LBACK_TIMEOUT) {
                     hs_rgb_blink_set_timer(timer_read32());
