@@ -161,14 +161,14 @@ void keyboard_post_init_kb(void) {
 
 #ifdef LED_POWER_EN_PIN
     gpio_set_pin_output(LED_POWER_EN_PIN);
-    if (rgb_matrix_get_val() != 0) gpio_write_pin_high(LED_POWER_EN_PIN);
-
 #endif
 
 #ifdef LED_POWER_EN2_PIN
     gpio_set_pin_output(LED_POWER_EN2_PIN);
-    if (rgb_matrix_get_val() != 0) gpio_write_pin_high(LED_POWER_EN2_PIN);
 #endif
+
+    /* Rail starts from its single owner (defect 5). */
+    wls_led_rail_apply();
 
 #ifdef HS_BT_DEF_PIN
     gpio_set_pin_input_high(HS_BT_DEF_PIN);
@@ -289,13 +289,8 @@ void suspend_power_down_kb(void) {
 }
 
 void suspend_wakeup_init_kb(void) {
-#    ifdef LED_POWER_EN_PIN
-    if (rgb_matrix_get_val() != 0) gpio_write_pin_high(LED_POWER_EN_PIN);
-#    endif
-
-#    ifdef LED_POWER_EN2_PIN
-    if (rgb_matrix_get_val() != 0) gpio_write_pin_high(LED_POWER_EN2_PIN);
-#    endif
+    /* Rail from its single owner (defect 5). */
+    wls_led_rail_apply();
 
     wireless_devs_change(wireless_get_current_devs(), wireless_get_current_devs(), false);
     suspend_wakeup_init_user();
@@ -1164,8 +1159,7 @@ bool     process_record_kb(uint16_t keycode, keyrecord_t *record) {
         case QK_RGB_MATRIX_VALUE_UP: {
             if (record->event.pressed) {
                 rgb_matrix_enable();
-                gpio_write_pin_high(LED_POWER_EN_PIN);
-                gpio_write_pin_high(LED_POWER_EN2_PIN);
+                wls_led_rail_apply();
                 if (rgb_matrix_get_speed() >= 120) {
                     rgb_blink_dir();
                 }
@@ -1174,8 +1168,7 @@ bool     process_record_kb(uint16_t keycode, keyrecord_t *record) {
         case QK_RGB_MATRIX_VALUE_DOWN: {
             if (record->event.pressed) {
                 if (rgb_matrix_get_val() <= RGB_MATRIX_VAL_STEP) {
-                    gpio_write_pin_low(LED_POWER_EN_PIN);
-                    gpio_write_pin_low(LED_POWER_EN2_PIN);
+                    wls_led_rail_apply();
                     for (uint8_t i = 0; i < RGB_MATRIX_LED_COUNT; i++) {
                         rgb_matrix_set_color(i, 0, 0, 0);
                     }
@@ -1295,6 +1288,10 @@ void housekeeping_task_user(void) { // loop
 
     hs_transport_arbitrate_cable(charging_state, prev_cable_state);
     prev_cable_state = charging_state;
+
+    /* Single owner for the LED rail: re-derive A5/A8 from the current RGB value
+     * on every half. See `wls_led_rail_apply()`. */
+    wls_led_rail_apply();
 
     if (charging_state && (bat_full_flag)) {
         hs_now_mode = MD_SND_CMD_DEVCTRL_CHARGING_DONE;
@@ -1769,13 +1766,8 @@ void lpwr_wakeup_hook(void) {
      * housekeeping_task_user so the policy has one home. */
     hs_transport_arbitrate_cable(gpio_read_pin(HS_BAT_CABLE_PIN), false);
 
-    if (rgb_matrix_get_val() != 0) {
-        gpio_write_pin_high(LED_POWER_EN_PIN);
-        gpio_write_pin_high(LED_POWER_EN2_PIN);
-    } else {
-        gpio_write_pin_low(LED_POWER_EN_PIN);
-        gpio_write_pin_low(LED_POWER_EN2_PIN);
-    }
+    /* Rail from its single owner (defect 5). */
+    wls_led_rail_apply();
 }
 
 void user_sync_mms_slave_handler(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
@@ -1797,14 +1789,15 @@ void user_sync_mms_slave_handler(uint8_t in_buflen, const void *in_data, uint8_t
             lpwr_set_timeout_manual(true);
             break;
         case 0xBB:
-
-            gpio_write_pin_low(A5);
-            gpio_write_pin_low(A8);
+            /* The master is suspending. Do not force this half's rail off: on
+             * this board the rail is derived from the RGB value and has one
+             * owner (`wls_led_rail_apply()`), so a forced-off here is exactly the
+             * latch that left a half dark while it still typed (defect 5). The
+             * slave's own suspend path drops the rail when it actually sleeps. */
             s2m->resp = 0x00;
             break;
         case 0xCC:
-            gpio_write_pin_high(A5);
-            gpio_write_pin_high(A8);
+            wls_led_rail_apply();
             s2m->resp = 0x00;
             break;
         case 0xDD:

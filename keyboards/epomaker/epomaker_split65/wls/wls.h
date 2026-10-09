@@ -40,6 +40,7 @@ uint8_t hs_mode_switch_devs(uint8_t lsat_btdev);
 void hs_rgb_blink_set_timer(uint32_t time);
 bool hs_transport_arbitrate_cable(bool cable_present, bool prev_present);
 void wls_persist_devs(void);
+void wls_led_rail_apply(void);
 
 /* BT profile selection, owned by the Bluetooth driver (item 14b): which of the
  * module's BT1..BT5 profiles is active, and re-pairing it. The sub-index has no

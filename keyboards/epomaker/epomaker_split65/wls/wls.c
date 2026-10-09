@@ -9,6 +9,25 @@
 static ioline_t col_pins_left[MATRIX_COLS]  = MATRIX_COL_PINS;
 static ioline_t col_pins_right[MATRIX_COLS] = MATRIX_COL_PINS_RIGHT;
 
+/* The LED rail: A5/A8 (`LED_POWER_EN_PIN`/`LED_POWER_EN2_PIN`) are the
+ * backlight rail ENABLE, one writer's concern. Historically the rail was written
+ * ad hoc from four sites that disagreed -- a boot/wake snapshot of the RGB
+ * value, the local brightness keycodes, and the cross-half 0xBB/0xCC relay --
+ * so a retained-LOW write (a stray 0xBB whose matching 0xCC sender is USB-gated
+ * off, or a local value-down press) could leave a half permanently dark while it
+ * still typed over the split link (defect 5). Rather than add a fifth writer,
+ * make the rail a pure function of the RGB value and give it one home: every
+ * writer now calls this, so the rail self-derives and cannot be latched. */
+void wls_led_rail_apply(void) {
+    bool on = rgb_matrix_get_val() != 0;
+#if defined(LED_POWER_EN_PIN)
+    gpio_write_pin(LED_POWER_EN_PIN, on);
+#endif
+#if defined(LED_POWER_EN2_PIN)
+    gpio_write_pin(LED_POWER_EN2_PIN, on);
+#endif
+}
+
 bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev) {
     static uint32_t scan_timer = 0x00;
 
