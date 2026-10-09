@@ -137,6 +137,15 @@ void usb_remote_wakeup(void) {
 #ifndef USB_REMOTE_USE_QMK
 void usb_remote_host(void) {
 
+    /* This runs from process_action_kb() on every action record while on USB.
+     * The genuine wake transition is handled once by the QMK USB core: the
+     * USB_EVENT_WAKEUP path enqueues the event from the USB ISR and
+     * usb_event_queue_task() -> usb_event_wakeup_handler() calls
+     * suspend_wakeup_init() in the main loop (protocol_pre_task), which runs
+     * here regardless of NO_USB_STARTUP_CHECK. So this function only needs to
+     * request the remote wakeup; it must NOT call suspend_wakeup_init() itself,
+     * or it would re-run the whole wake init on every keypress while the host
+     * keeps the bus suspended. */
     if (USB_DRIVER.state == USB_SUSPENDED) {
         if ((USB_DRIVER.status & 2U) && suspend_wakeup_condition()) {
             usbWakeupHost(&USB_DRIVER);
@@ -150,9 +159,6 @@ void usb_remote_host(void) {
             wait_ms(USB_SUSPEND_WAKEUP_DELAY);
 #    endif
         }
-#    if !defined(USB_REMOTE_USE_QMK) && USB_POWER_DOWN_DELAY
-        suspend_wakeup_init();
-#    endif
     }
 }
 
