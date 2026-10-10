@@ -68,15 +68,12 @@ void rgb_matrix_hs_set_remain_time(uint8_t index, uint8_t remain_time);
 #define keymap_is_base_layer() ((get_highest_layer(default_layer_state) == _BL) || (get_highest_layer(default_layer_state) == _FL))
 
 uint32_t        post_init_timer       = 0x00;
-bool            inqbat_flag           = false;
 bool            mac_status            = false;
 bool            charging_state        = false;
 bool            bat_full_flag         = false;
 bool            enable_bat_indicators = true;
-uint32_t        bat_indicator_cnt     = true;
+uint32_t        bat_indicator_cnt     = 0;
 static uint32_t ee_clr_timer          = 0;
-bool            test_white_light_flag = false;
-HSV             start_hsv;
 bool            no_record_fg;
 uint8_t         pov;
 static bool     im_bat_req_charging_flag = false;
@@ -225,8 +222,6 @@ void keyboard_post_init_kb(void) {
     keyboard_post_init_user();
 
     rgbrec_init(confinfo.record_channel);
-
-    start_hsv = rgb_matrix_get_hsv();
 
     pov = *md_getp_bat();
     // usart_init();
@@ -531,11 +526,6 @@ bool process_record_wls(uint16_t keycode, keyrecord_t *record) {
 #endif
 
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
-    if (test_white_light_flag && record->event.pressed) {
-        test_white_light_flag = false;
-        rgb_matrix_set_color_all(0x00, 0x00, 0x00);
-    }
-
     if (*md_getp_state() == MD_STATE_CONNECTED) {
         hs_link_activity();
     }
@@ -1240,39 +1230,24 @@ bool     process_record_kb(uint16_t keycode, keyrecord_t *record) {
     return true;
 }
 
-/* Cable-driven transport arbitration — DISABLED (requirement 2).
+/* Cable-driven transport arbitration — REMOVED (functional requirement 2).
  *
- * Historically this was the single owner of the "switch to USB on cable
- * insert, restore the remembered wireless transport on remove" policy. That
- * policy defeats functional requirement 2: the operator charges from an
- * external PSU while using the keyboard wirelessly, so "a cable is present"
- * must NOT by itself mean "switch to USB".
- *
- * Mode selection now belongs solely to the physical mode switch, whose
- * detection loop (hs_modeio_detection(), wls/wls.c) already calls
- * wireless_devs_change() when the switch position changes. The function is
- * kept as a no-op so its callers (housekeeping_task_user, lpwr_wakeup_hook)
- * and the CI coupling guard stay valid; it deliberately no longer mutates
- * confinfo.last_wireless_devs or the current device.
- *
- * Returns false always: no transport change is ever issued from the cable. */
-bool hs_transport_arbitrate_cable(bool cable_present, bool prev_present) {
-    (void)cable_present;
-    (void)prev_present;
-    return false;
-}
+ * Historically `hs_transport_arbitrate_cable()` owned the "switch to USB on
+ * cable insert, restore the remembered wireless transport on remove" policy.
+ * That defeats requirement 2: the operator charges from an external PSU while
+ * using the keyboard wirelessly, so "a cable is present" must NOT by itself
+ * mean "switch to USB". Mode selection now belongs solely to the physical mode
+ * switch (hs_modeio_detection(), wls/wls.c). It was first gutted to a no-op and
+ * its callers dropped in the design cleanup; the history is in docs/FINDINGS.md.
+ */
 
 void housekeeping_task_user(void) { // loop
     uint8_t         hs_now_mode;
     static uint32_t hs_current_time;
-    static bool     prev_cable_state = false;
 
     charging_state = gpio_read_pin(HS_BAT_CABLE_PIN);
 
     bat_full_flag = gpio_read_pin(BAT_FULL_PIN);
-
-    hs_transport_arbitrate_cable(charging_state, prev_cable_state);
-    prev_cable_state = charging_state;
 
     /* Single owner for the LED rail: re-derive A5/A8 from the current RGB value
      * on every half. See `wls_led_rail_apply()`. */
@@ -1499,7 +1474,6 @@ void rgb_matrix_hs_bat(void) {
         }
     }
 }
-bool temp, im_test_rate_flag;
 void bat_indicators(void) {
     static uint32_t battery_process_time = 0;
     uint8_t         bat_level            = *md_getp_bat();
@@ -1661,12 +1635,6 @@ void rgb_matrix_hs_indicator(void) {
 }
 
 bool rgb_matrix_indicators_advanced_kb(uint8_t led_min, uint8_t led_max) {
-    if (test_white_light_flag) {
-        RGB rgb_test_open = hsv_to_rgb((HSV){.h = 0, .s = 0, .v = RGB_MATRIX_VAL_STEP * 5});
-        rgb_matrix_set_color_all(rgb_test_open.r, rgb_test_open.g, rgb_test_open.b);
-
-        return false;
-    }
 #ifdef RGBLIGHT_ENABLE
     if (rgb_matrix_indicators_advanced_user(led_min, led_max) != true) {
         return false;
@@ -1691,7 +1659,7 @@ bool rgb_matrix_indicators_advanced_kb(uint8_t led_min, uint8_t led_max) {
 #ifdef WIRELESS_ENABLE
     rgb_matrix_wls_indicator();
 
-    if (enable_bat_indicators && !inqbat_flag && !rgbrec_is_started()) {
+    if (enable_bat_indicators && !rgbrec_is_started()) {
         rgb_matrix_hs_bat();
         bat_indicators();
         bat_indicator_cnt = timer_read32();
@@ -1757,11 +1725,6 @@ void hs_reset_settings(void) {
 
 void lpwr_wakeup_hook(void) {
     hs_mode_scan(false, hsm_mode_seed(wireless_get_current_devs()), hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
-
-    /* If the board woke up with the USB cable attached, switch onto USB and
-     * remember the wireless transport it came from. Shared with
-     * housekeeping_task_user so the policy has one home. */
-    hs_transport_arbitrate_cable(gpio_read_pin(HS_BAT_CABLE_PIN), false);
 
     /* Rail from its single owner (defect 5). */
     wls_led_rail_apply();

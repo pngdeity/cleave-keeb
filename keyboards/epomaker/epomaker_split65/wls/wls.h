@@ -44,7 +44,6 @@ uint8_t hs_mode_switch_devs(uint8_t lsat_btdev);
  * event such as a keypress or wake. The countdown's policy lives in the pure
  * `hsm_link_watch`; this is only the store-back shell. */
 void hs_link_activity(void);
-bool hs_transport_arbitrate_cable(bool cable_present, bool prev_present);
 void wls_persist_devs(void);
 void wls_led_rail_apply(void);
 void wls_indicate_devs(uint8_t new_devs, bool reset);
