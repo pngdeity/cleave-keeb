@@ -15,6 +15,7 @@ ifeq ($(strip $(WIRELESS_ENABLE)), yes)
         $(WIRELESS_DIR)/lowpower.c \
         $(WIRELESS_DIR)/lowpower_logic.c \
         $(WIRELESS_DIR)/md_raw.c \
+        $(WIRELESS_DIR)/md_frame.c \
         $(WIRELESS_DIR)/smsg.c \
         $(WIRELESS_DIR)/module.c
 
