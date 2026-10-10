@@ -84,6 +84,17 @@ void lpwr_set_sleep_wakeupcd(lpwr_wakeupcd_t wakeupcd) {
     lpwr_wakeupcd |= wakeupcd;
 }
 
+void lpwr_clear_sleep_wakeupcd(void) {
+    /* A real clear, which the accumulate-only setter cannot express. Done under
+     * a critical section because the PAL EXTI callback (`lpwr_wb32.c`
+     * `palcallback`) accumulates into the same word from ISR context: an
+     * unguarded `= NONE` could race an `|=` and drop the wake edge that is the
+     * whole point of the window. */
+    chSysLock();
+    lpwr_wakeupcd = LPWR_WAKEUP_NONE;
+    chSysUnlock();
+}
+
 uint32_t lpwr_get_sleep_wakeupcd(void) {
     return lpwr_wakeupcd;
 }
@@ -141,22 +152,11 @@ bool lpwr_is_allow_timeout(void) __attribute__((weak));
 bool lpwr_is_allow_timeout(void) {
     uint32_t timeout = lpwr_timeout_value_read();
 
-    if (lpwr_is_allow_timeout_hook() != true) {
-        manual_timeout = false;
-        return false;
-    }
-
-    if ((wireless_get_current_devs() == DEVS_USB) && (USB_DRIVER.state == USB_ACTIVE)) {
-        manual_timeout = false;
-        return false;
-    }
-
-    if (manual_timeout || (timeout && (last_input_activity_elapsed() >= timeout))) {
-        manual_timeout = false;
-        return true;
-    }
-
-    return false;
+    /* A pure query: it decides, and never consumes the manual override. The
+     * caller consumes it only when it actually takes the timeout path, so a
+     * request made while the decision is false (on USB, or forbidden by the
+     * hook) is not silently destroyed. */
+    return lpwr_timeout_allowed_decide(lpwr_is_allow_timeout_hook() == true, (wireless_get_current_devs() == DEVS_USB) && (USB_DRIVER.state == USB_ACTIVE), manual_timeout, timeout && (last_input_activity_elapsed() >= timeout));
 }
 
 bool lpwr_is_allow_presleep_hook(void) __attribute__((weak));
@@ -269,7 +269,7 @@ void lpwr_stop_cb(void) {
         return;
     }
 
-    lpwr_set_sleep_wakeupcd(LPWR_WAKEUP_NONE);
+    lpwr_clear_sleep_wakeupcd();
 
     lpwr_stop_hook_pre();
     lpwr_enter_stop();
@@ -316,6 +316,9 @@ void lpwr_task(void) {
     switch (lpwr_get_state()) {
         case LPWR_NORMAL: {
             if (lpwr_is_allow_timeout()) {
+                /* The decision consumed nothing; the override is honored here,
+                 * at the point the timeout path is actually taken. */
+                lpwr_set_timeout_manual(false);
                 lpwr_update_timestamp();
                 lpwr_set_state(LPWR_PRESLEEP);
             }

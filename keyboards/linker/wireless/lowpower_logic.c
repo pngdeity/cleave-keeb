@@ -16,3 +16,17 @@ bool lpwr_wakeup_is_real(uint32_t wake_set, uint32_t armed_mask) {
      * code that fired in the same cycle either. */
     return (wake_set & armed_mask) != 0;
 }
+
+bool lpwr_timeout_allowed_decide(bool hook_allows, bool usb_active, bool manual_pending, bool idle_elapsed) {
+    /* A board hook may forbid the idle timeout outright (including a pending
+     * manual override: the board knows a stop would be unsafe). A live USB host
+     * is never timed out. Otherwise a timeout stop is allowed when either a
+     * manual override is pending or the idle timer has elapsed. */
+    if (!hook_allows) {
+        return false;
+    }
+    if (usb_active) {
+        return false;
+    }
+    return manual_pending || idle_elapsed;
+}

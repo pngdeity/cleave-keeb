@@ -92,3 +92,18 @@ TEST_F(LowpowerLogicTest, pad_aliasing_is_a_pinned_board_fact) {
     // A genuine matrix wake on a differently-numbered pad still registers:
     EXPECT_TRUE(lpwr_wakeup_is_real(LPWR_WAKEUP_MATRIX, armed));
 }
+
+TEST_F(LowpowerLogicTest, timeout_is_allowed_only_when_a_stop_can_be_taken) {
+    // Hook forbids: never allowed, regardless of the other facts.
+    EXPECT_FALSE(lpwr_timeout_allowed_decide(false, false, true, true));
+    EXPECT_FALSE(lpwr_timeout_allowed_decide(false, false, false, true));
+
+    // A live USB host is never timed out, even with a manual override pending.
+    EXPECT_FALSE(lpwr_timeout_allowed_decide(true, true, true, true));
+    EXPECT_FALSE(lpwr_timeout_allowed_decide(true, true, false, true));
+
+    // Otherwise: a pending manual override, or an elapsed idle timeout.
+    EXPECT_TRUE(lpwr_timeout_allowed_decide(true, false, true, false));
+    EXPECT_TRUE(lpwr_timeout_allowed_decide(true, false, false, true));
+    EXPECT_FALSE(lpwr_timeout_allowed_decide(true, false, false, false));
+}
