@@ -6,25 +6,13 @@
 #    include "quantum.h"
 #    include "raw_hid.h"
 #    include "wireless.h"
-#    include "usb_endpoints.h"
-#    include "usb_main.h"
-#    include "host.h"
 
-void replaced_hid_send(uint8_t *data, uint8_t length) {
-
-    if (length != RAW_EPSIZE) {
-        return;
-    }
-
-    /* Raw HID follows the same active-driver resolution as every other report
-     * (item 14d): `host_raw_hid_send()` picks the driver from the connection
-     * host, so on USB it writes the raw endpoint and on Bluetooth/2.4 GHz it
-     * reaches the module sink through the driver's `send_raw_hid`. Branching on
-     * `usb_connected_state()` (the bus state) would diverge from every other
-     * report path, which keys off `connection_get_host()`. */
-    host_raw_hid_send(data, length);
-}
-
+/* The receive path for a raw HID frame tunneled over the module link: the
+ * module decoder forwards it to `raw_hid_receive()`, exactly as the USB path
+ * does. The send path needs no board glue -- `raw_hid_send()` (upstream) calls
+ * `host_raw_hid_send()`, which selects the driver from the connection host, so
+ * the USB endpoint and the Bluetooth/2.4 GHz module sinks are reached the same
+ * way every other report is. */
 void md_receive_raw_cb(uint8_t *data, uint8_t length) {
     raw_hid_receive(data, length);
 }

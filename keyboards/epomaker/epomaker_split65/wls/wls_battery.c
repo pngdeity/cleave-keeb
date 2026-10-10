@@ -10,12 +10,12 @@
 #    include "sync_timer.h"
 #    include "connection.h"
 
-/* The wireless stack tunnels raw HID through md_raw.c's replaced_hid_send()
- * instead of raw_hid_send(): on USB it writes the raw endpoint, otherwise it
- * forwards the report over the 2.4G/BT link. md_raw.h remaps raw_hid_send to
- * replaced_hid_send via line-specific macros, so this new file must call it
- * directly. */
-void replaced_hid_send(uint8_t *, uint8_t);
+/* Raw HID leaves through the upstream `raw_hid_send()`: it calls
+ * `host_raw_hid_send()`, which selects the driver from the connection host
+ * (`host_get_active_driver()->send_raw_hid`) — the USB endpoint, or the
+ * Bluetooth/2.4 GHz module sink. There is no board-private raw path; the old
+ * `replaced_hid_send()` shim and the `md_raw.h` line-pinned alias that fed it
+ * only duplicated this and are deleted. */
 
 static void kb_battery_send(const kb_battery_snapshot_t *snap) {
     uint8_t buf[RAW_EPSIZE];
@@ -39,7 +39,7 @@ static void kb_battery_send(const kb_battery_snapshot_t *snap) {
     buf[KB_BATTERY_IDX_MD_VERSION] = md_get_version();
     buf[KB_BATTERY_IDX_MD_STATE]   = *md_getp_state();
 
-    replaced_hid_send(buf, RAW_EPSIZE);
+    raw_hid_send(buf, RAW_EPSIZE);
 }
 
 void raw_hid_receive(uint8_t *data, uint8_t length) {
