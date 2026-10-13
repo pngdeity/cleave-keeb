@@ -6,6 +6,7 @@
 #include "wls/wls.h"
 #include "wls/wls_eeprom.h"
 #include "wls/indicator_logic.h"
+#include "wls/sleep_order_logic.h"
 #include "wls/transport_logic.h"
 #include "quantum.h"
 
@@ -130,8 +131,8 @@ void wls_indicator_battery_blink(void) {
 }
 
 void wls_indicator_battery(void) {
-    static uint32_t battery_process_time = 0;
-    uint8_t         bat_level            = *md_getp_bat();
+    static wls_sleep_order_t sleep_order = WLS_SLEEP_ORDER_IDLE;
+    uint8_t                  bat_level   = *md_getp_bat();
 
     if (!is_keyboard_master()) {
         return;
@@ -167,29 +168,26 @@ void wls_indicator_battery(void) {
     }
 
     if (charging_state && (bat_full_flag)) {
-        battery_process_time = 0;
+        (void)wls_sleep_order_tick(&sleep_order, false, timer_read32());
         if (im_bat_req_charging_flag) rgb_matrix_set_color(HS_MATRIX_BLINK_INDEX_BAT, 0xFF, 0x00, 0x00);
     } else if (charging_state) {
-        battery_process_time = 0;
+        (void)wls_sleep_order_tick(&sleep_order, false, timer_read32());
         if (im_bat_req_charging_flag) rgb_matrix_set_color(HS_MATRIX_BLINK_INDEX_BAT, 0x00, 0xFF, 0x00);
     } else if (bat_level <= BATTERY_CAPACITY_LOW) {
         rgb_matrix_hs_bat_set(HS_MATRIX_BLINK_INDEX_BAT, (RGB){0xFF, 0x00, 0x00}, 250, 1);
 
-        if (bat_level <= BATTERY_CAPACITY_STOP) {
-            if (!battery_process_time) {
-                battery_process_time = timer_read32();
-            }
-
-            if (battery_process_time && timer_elapsed32(battery_process_time) > 60000) {
-                battery_process_time = 0;
-                if (hsm_should_order_sleep(bat_level, charging_state, BATTERY_CAPACITY_STOP)) {
-                    wls_order_sleep(true);
-                    lpwr_set_timeout_manual(true);
-                }
+        /* The timing (arm on first critical sight, fire once the window
+         * elapses) is the pure `wls_sleep_order_tick()`; the *whether* is the
+         * pure `hsm_should_order_sleep()`. This is only the shell. */
+        bool critical = bat_level <= BATTERY_CAPACITY_STOP;
+        if (wls_sleep_order_tick(&sleep_order, critical, timer_read32()) == WLS_SLEEP_ORDER_NOW) {
+            if (hsm_should_order_sleep(bat_level, charging_state, BATTERY_CAPACITY_STOP)) {
+                wls_order_sleep(true);
+                lpwr_set_timeout_manual(true);
             }
         }
     } else {
-        battery_process_time = 0;
+        (void)wls_sleep_order_tick(&sleep_order, false, timer_read32());
     }
 }
 

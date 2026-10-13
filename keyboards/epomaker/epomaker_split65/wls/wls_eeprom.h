@@ -62,3 +62,10 @@ void eeconfig_confinfo_init(void);
 
 /* Configure the split serial port (the module UART is a separate driver). */
 void usart_init(void);
+
+/* Wipe the board's persisted configuration to defaults: re-initialise the
+ * EEPROM, restore the rgb-matrix and rgblight defaults, re-read the keymap and
+ * clear NKRO. This is the settings-reset's `WIPE_CONFIG` step, owned here so the
+ * reset executor (wls_lifecycle) does not have to know how the board's storage
+ * is laid out. Idempotent and side-effect-only. */
+void wls_eeprom_wipe_config(void);

@@ -7,6 +7,7 @@
 #include "wls/wls_eeprom.h"
 #include "wls/keymap_logic.h"
 #include "wls/transport_logic.h"
+#include "wls/rgb_key_logic.h"
 #include "wls/wls_indicator.h"
 #include "rgb_record/rgb_record.h"
 #include "quantum.h"
@@ -374,40 +375,32 @@ bool wls_keymap_process_record(uint16_t keycode, keyrecord_t *record) {
 
             return false;
         } break;
-        case QK_RGB_MATRIX_SPEED_UP: {
-            if (record->event.pressed) {
-                if (rgb_matrix_get_speed() >= 215) {
-                    rgb_blink_dir();
-                }
-            }
-        } break;
-        case QK_RGB_MATRIX_SPEED_DOWN: {
-            if (record->event.pressed) {
-                if (rgb_matrix_get_speed() <= 95) {
-                    rgb_blink_dir();
-                }
-            }
-        } break;
-        case QK_RGB_MATRIX_VALUE_UP: {
-            if (record->event.pressed) {
+        case QK_RGB_MATRIX_SPEED_UP:
+        case QK_RGB_MATRIX_SPEED_DOWN:
+        case QK_RGB_MATRIX_VALUE_UP:
+        case QK_RGB_MATRIX_VALUE_DOWN: {
+            /* The thresholds and the mode step are the pure `wls_rgb_key_decide()`
+             * (wls/rgb_key_logic); this is only the effect shell. */
+            wls_rgb_state_t      st = {rgb_matrix_get_speed(), rgb_matrix_get_val(), RGB_MATRIX_VAL_STEP, rgb_matrix_get_mode(), record->event.pressed};
+            wls_rgb_key_action_t ra = wls_rgb_key_decide(keycode, &st);
+            if (ra.enable) {
                 rgb_matrix_enable();
                 wls_led_rail_apply();
-                if (rgb_matrix_get_speed() >= 120) {
-                    rgb_blink_dir();
-                }
             }
-        } break;
-        case QK_RGB_MATRIX_VALUE_DOWN: {
-            if (record->event.pressed) {
-                if (rgb_matrix_get_val() <= RGB_MATRIX_VAL_STEP) {
+            switch (ra.kind) {
+                case WLS_RGB_KEY_ACK_DIR:
+                    rgb_blink_dir();
+                    break;
+                case WLS_RGB_KEY_BLANK_ALL:
                     wls_led_rail_apply();
                     for (uint8_t i = 0; i < RGB_MATRIX_LED_COUNT; i++) {
                         rgb_matrix_set_color(i, 0, 0, 0);
                     }
-                }
-                if (rgb_matrix_get_speed() <= 30) {
-                    rgb_blink_dir();
-                }
+                    break;
+                case WLS_RGB_KEY_SET_MODE:
+                case WLS_RGB_KEY_NONE:
+                default:
+                    break;
             }
         } break;
 

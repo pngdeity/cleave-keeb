@@ -279,23 +279,7 @@ void wls_reset_settings(wls_reset_cause_t cause) {
                 break;
             case WLS_RESET_STEP_WIPE_CONFIG:
                 wls_bat_suppress_arm();
-                eeconfig_init();
-                eeconfig_update_rgb_matrix_default();
-
-#ifdef RGBLIGHT_ENABLE
-                extern void rgblight_init(void);
-                is_rgblight_initialized = false;
-                rgblight_init();
-                eeconfig_update_rgblight_default();
-                rgblight_enable();
-#endif
-
-                eeconfig_read_keymap(&keymap_config);
-
-#if defined(NKRO_ENABLE) && defined(FORCE_NKRO)
-                keymap_config.nkro = 0;
-                eeconfig_update_keymap(&keymap_config);
-#endif
+                wls_eeprom_wipe_config();
                 break;
             case WLS_RESET_STEP_FLASH:
                 /* The acknowledgement flash; a refusal here ends the reset. */
