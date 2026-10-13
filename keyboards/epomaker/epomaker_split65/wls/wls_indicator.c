@@ -8,6 +8,8 @@
 #include "wls/indicator_logic.h"
 #include "wls/sleep_order_logic.h"
 #include "wls/transport_logic.h"
+#include "wls/boot_blink_logic.h"
+#include "wls/boot_report_logic.h"
 #include "quantum.h"
 
 #ifdef WIRELESS_ENABLE
@@ -327,6 +329,41 @@ uint32_t wls_bat_suppress_deadline(void) {
 
 void wls_bat_suppress_arm(void) {
     bat_suppress_until = timer_read32() + WLS_BAT_SUPPRESS_MS;
+}
+
+/* The boot-report blink: the retained boot decision (Measure D), shown in
+ * sequence over the whole matrix. This is the second exporter the derivation
+ * called for -- it reads out when the USB line is down, which is exactly when
+ * the `0xA4` reply that carries the same record cannot be read. The step
+ * schedule is the pure `wls_boot_report_blink_step()`; the sequencer that paces
+ * it is the pure `wls_boot_blink_logic`; this pass only paints. */
+static wls_boot_blink_t boot_blink = WLS_BOOT_BLINK_IDLE;
+static uint8_t          boot_blink_steps[WLS_BOOT_REPORT_BLINK_STEPS];
+static RGB              boot_blink_colours[WLS_BOOT_REPORT_BLINK_STEPS];
+
+/* Build the schedule from the retained decision and start the sequence. Called
+ * once, at boot, after the decision has been recorded. */
+void wls_indicator_boot_report_start(void) {
+    wls_boot_report_t report = wls_boot_decision();
+    for (uint8_t i = 0; i < WLS_BOOT_REPORT_BLINK_STEPS; i++) {
+        wls_boot_blink_step_t step = wls_boot_report_blink_step(&report, i);
+        boot_blink_steps[i]        = step.count;
+        boot_blink_colours[i]      = (RGB){step.r, step.g, step.b};
+    }
+    wls_boot_blink_start(&boot_blink, timer_read32());
+}
+
+/* Paint the current boot-report step (called every RGB frame). Additive: it only
+ * paints while the sequence is running, so it cannot disturb the other passes. */
+void wls_indicator_boot_report(void) {
+    wls_boot_blink_out_t out = wls_boot_blink_tick(&boot_blink, WLS_BOOT_REPORT_BLINK_STEPS, boot_blink_steps, timer_read32());
+
+    if (out.kind != WLS_BOOT_BLINK_SHOW) {
+        return;
+    }
+
+    RGB rgb = out.pulse_on ? boot_blink_colours[out.step] : (RGB){0, 0, 0};
+    rgb_matrix_set_color_all(rgb.r, rgb.g, rgb.b);
 }
 
 #endif /* RGB_MATRIX_ENABLE */

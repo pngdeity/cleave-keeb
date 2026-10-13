@@ -107,6 +107,8 @@ void wls_lifecycle_boot(void) {
          * down, this retained copy is the only record of what the boot decided
          * (see `wls/boot_report_logic`). */
         wls_note_boot_decision((wls_boot_report_t){.switch_pos = (uint8_t)pos, .host = applied.host, .settled = (applied.kind == HSM_SWITCH_SETTLED)});
+        /* Arm the host-less readout of that same decision (the blink exporter). */
+        wls_indicator_boot_report_start();
 
         /* An unsettled read applied nothing; the returned host is then not a
          * decision, so do NOT drive the USB line from it. Leaving the line as it

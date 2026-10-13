@@ -60,6 +60,13 @@ uint32_t wls_bat_suppress_deadline(void);
 /* Arm the post-reset battery suppression. */
 void wls_bat_suppress_arm(void);
 
+/* Start the boot-report blink sequence from the retained boot decision. Called
+ * once at boot -- the second exporter, readable with no host link. */
+void wls_indicator_boot_report_start(void);
+
+/* Paint the current boot-report step if the sequence is running (every frame). */
+void wls_indicator_boot_report(void);
+
 /* The transport confirmation flash is armed from the mode-switch edge; exposed
  * for the lifecycle concern. */
 void wls_indicator_wls_set(uint8_t index, RGB rgb, uint32_t interval, uint8_t times);

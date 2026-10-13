@@ -211,6 +211,11 @@ bool rgb_matrix_indicators_advanced_kb(uint8_t led_min, uint8_t led_max) {
 #ifdef WIRELESS_ENABLE
     wls_indicator_channel_flash();
 
+    /* The boot-report readout: only paints while its sequence runs (a few
+     * seconds after boot), so it is additive and cannot disturb the passes
+     * below. It is the only indicator that works with the USB line down. */
+    wls_indicator_boot_report();
+
     /* While suppressed (post-reset) the battery indicator is hidden; the
      * suppression is a deadline, so it simply expires — no re-arm, no flag to
      * flip back. Otherwise the indicator is shown and its own bounded blink
