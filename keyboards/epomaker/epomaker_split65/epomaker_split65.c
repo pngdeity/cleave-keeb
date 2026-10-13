@@ -5,6 +5,7 @@
 #include "wls/wls.h"
 #include "wls/transport_logic.h"
 #include "wls/keymap_logic.h"
+#include "wls/wls_eeprom.h"
 #include "rgb_record/rgb_record.h"
 #include "quantum.h"
 #include "connection.h"
@@ -16,27 +17,6 @@
 #    include "lowpower.h"
 #    include "module.h"
 #endif
-
-typedef union {
-    uint32_t raw;
-    struct {
-        uint8_t flag : 1;
-        uint8_t devs : 3;
-        uint8_t record_channel : 4;
-        uint8_t record_last_mode;
-        uint8_t last_btdevs : 3;
-        uint8_t dir_flag : 1;
-        uint8_t filp : 1;
-        uint8_t last_wireless_devs : 3;
-        uint8_t version : 8;
-    };
-} confinfo_t;
-confinfo_t confinfo;
-
-/* Bump when a field's meaning or position changes. An EEPROM block written by
- * an older firmware then fails the check below and is re-defaulted once, which
- * is deterministic where a per-field heuristic is not. */
-#define CONFINFO_VERSION 1
 
 typedef struct {
     bool     active;
@@ -82,16 +62,6 @@ static bool          no_record_fg;
 static bool          im_bat_req_charging_flag = false;
 static const uint8_t buff[]                   = {14, 8, 2, 1, 1, 1, 1, 1, 1, 1, 0};
 
-void usart_init(void) {
-    // palSetLineMode(SERIAL_USART_TX_PIN, PAL_MODE_ALTERNATE(SERIAL_USART_TX_PAL_MODE) | PAL_OUTPUT_TYPE_OPENDRAIN);
-    palSetLineMode(SERIAL_USART_TX_PIN, PAL_MODE_ALTERNATE(SERIAL_USART_TX_PAL_MODE) | PAL_OUTPUT_TYPE_PUSHPULL | PAL_OUTPUT_SPEED_HIGHEST);
-    palSetLineMode(SERIAL_USART_RX_PIN, PAL_MODE_ALTERNATE(SERIAL_USART_RX_PAL_MODE) | PAL_OUTPUT_TYPE_PUSHPULL | PAL_OUTPUT_SPEED_HIGHEST);
-}
-
-void eeconfig_confinfo_update(uint32_t raw) {
-    eeconfig_update_kb(raw);
-}
-
 typedef struct _master_to_slave_t {
     uint8_t cmd;
     uint8_t body[4];
@@ -101,31 +71,6 @@ typedef struct _slave_to_master_t {
     uint8_t resp;
     uint8_t body[4];
 } slave_to_master_t;
-
-uint32_t eeconfig_confinfo_read(void) {
-    return eeconfig_read_kb();
-}
-
-void eeconfig_confinfo_default(void) {
-    confinfo.flag               = true;
-    confinfo.record_channel     = 0;
-    confinfo.record_last_mode   = 0xff;
-    confinfo.last_btdevs        = 1;
-    confinfo.dir_flag           = 0;
-    confinfo.last_wireless_devs = DEVS_BT1;
-    confinfo.version            = CONFINFO_VERSION;
-
-    // #ifdef WIRELESS_ENABLE
-    //     confinfo.devs = DEVS_USB;
-    // #endif
-
-    eeconfig_init_user_datablock();
-    eeconfig_confinfo_update(confinfo.raw);
-
-#ifdef RGBLIGHT_ENABLE
-    rgblight_mode(buff[0]);
-#endif
-}
 
 void master_sync_mms_slave(uint8_t last_mode, uint8_t now_mode, uint8_t reset) {
     master_to_slave_t m2s = {0};
@@ -144,16 +89,6 @@ void master_sync_mms_slave(uint8_t last_mode, uint8_t now_mode, uint8_t reset) {
     }
 }
 
-void eeconfig_confinfo_init(void) {
-    confinfo.raw = eeconfig_confinfo_read();
-    /* A blank block, or one written by older firmware (different layout), is
-     * re-defaulted. The version gate makes the migration deterministic instead
-     * of guessing per field. */
-    if (!confinfo.raw || confinfo.version != CONFINFO_VERSION) {
-        eeconfig_confinfo_default();
-    }
-}
-
 void keyboard_post_init_kb(void) {
 #ifdef CONSOLE_ENABLE
     debug_enable = true;
@@ -163,6 +98,9 @@ void keyboard_post_init_kb(void) {
     wls_note_boot();
 
     eeconfig_confinfo_init();
+#ifdef RGBLIGHT_ENABLE
+    rgblight_mode(buff[0]);
+#endif
 
 #ifdef LED_POWER_EN_PIN
     gpio_set_pin_output(LED_POWER_EN_PIN);
