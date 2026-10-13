@@ -8,6 +8,7 @@
 #include "wls/wls_eeprom.h"
 #include "wls/wls_usb.h"
 #include "wls/split_logic.h"
+#include "wls/reset_logic.h"
 #include "wls/wls_split.h"
 #include "wls/wls_lifecycle.h"
 #include "wls/indicator_logic.h"
@@ -43,7 +44,7 @@ hs_rgb_indicator_t hs_rgb_bat[HS_RGB_BAT_COUNT];
 
 void user_sync_mms_slave_handler(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data);
 void rgb_blink_dir(void);
-void hs_reset_settings(void);
+void hs_reset_settings(wls_reset_cause_t cause);
 void rgb_matrix_hs_indicator(void);
 void rgb_matrix_hs_indicator_set(uint8_t index, RGB rgb, uint32_t interval, uint8_t times);
 void rgb_matrix_hs_set_remain_time(uint8_t index, uint8_t remain_time);
@@ -976,7 +977,7 @@ bool rgb_matrix_indicators_advanced_kb(uint8_t led_min, uint8_t led_max) {
 #endif
 
     if (ee_clr_timer && timer_elapsed32(ee_clr_timer) > 3000) {
-        hs_reset_settings();
+        hs_reset_settings(WLS_RESET_CAUSE_LOCAL);
         ee_clr_timer = 0;
     }
 
@@ -1010,42 +1011,58 @@ bool rgb_matrix_indicators_advanced_kb(uint8_t led_min, uint8_t led_max) {
     return true;
 }
 
-void hs_reset_settings(void) {
-    if (is_keyboard_master()) {
-        if (wls_split_send(WLS_SPLIT_CMD_RESET_SETTINGS, NULL)) {
-            dprintf("Slave Sleep OK\n");
-        } else {
-            dprintf("Slave sync failed!\n");
-        }
-    }
-    bat_suppress_until = timer_read32() + WLS_BAT_SUPPRESS_MS;
-    eeconfig_init();
-    eeconfig_update_rgb_matrix_default();
+/* Execute the reset plan. The *policy* (which consequences, in what order,
+ * and the one thing the cause changes) is the pure `wls_reset_plan_of()`
+ * (wls/reset_logic); this function only performs the steps it names. Two
+ * unrelated triggers reach it -- the `EE_CLR` hold timer (LOCAL) and the split
+ * slave handler (REMOTE); the cause is the whole reason that handler no longer
+ * needs to call back into the lifecycle module. */
+void hs_reset_settings(wls_reset_cause_t cause) {
+    wls_reset_plan_t plan = wls_reset_plan_of(cause);
+
+    for (uint8_t i = 0; i < plan.count; i++) {
+        switch (plan.steps[i]) {
+            case WLS_RESET_STEP_NOTIFY_PEER:
+                if (is_keyboard_master()) {
+                    if (wls_split_send(WLS_SPLIT_CMD_RESET_SETTINGS, NULL)) {
+                        dprintf("Slave Sleep OK\n");
+                    } else {
+                        dprintf("Slave sync failed!\n");
+                    }
+                }
+                break;
+            case WLS_RESET_STEP_WIPE_CONFIG:
+                bat_suppress_until = timer_read32() + WLS_BAT_SUPPRESS_MS;
+                eeconfig_init();
+                eeconfig_update_rgb_matrix_default();
 
 #ifdef RGBLIGHT_ENABLE
-    extern void rgblight_init(void);
-    is_rgblight_initialized = false;
-    rgblight_init();
-    eeconfig_update_rgblight_default();
-    rgblight_enable();
+                extern void rgblight_init(void);
+                is_rgblight_initialized = false;
+                rgblight_init();
+                eeconfig_update_rgblight_default();
+                rgblight_enable();
 #endif
 
-    eeconfig_read_keymap(&keymap_config);
+                eeconfig_read_keymap(&keymap_config);
 
 #if defined(NKRO_ENABLE) && defined(FORCE_NKRO)
-    keymap_config.nkro = 0;
-    eeconfig_update_keymap(&keymap_config);
+                keymap_config.nkro = 0;
+                eeconfig_update_keymap(&keymap_config);
 #endif
-
-    // #if defined(WIRELESS_ENABLE)
-    //     wireless_devs_change(wireless_get_current_devs(), DEVS_USB, false);
-    // #endif
-
-    if (hs_reset_settings_user() != true) {
-        return;
+                break;
+            case WLS_RESET_STEP_FLASH:
+                /* The acknowledgement flash; a refusal here ends the reset. */
+                if (hs_reset_settings_user() != true) {
+                    return;
+                }
+                break;
+            case WLS_RESET_STEP_RERUN_BOOT:
+                hs_link_activity();
+                keyboard_post_init_kb();
+                break;
+        }
     }
-    hs_link_activity();
-    keyboard_post_init_kb();
 }
 
 void lpwr_wakeup_hook(void) {
@@ -1082,7 +1099,7 @@ void user_sync_mms_slave_handler(uint8_t in_buflen, const void *in_data, uint8_t
             s2m->resp = 0x00;
             break;
         case WLS_SPLIT_ACT_RESET_SETTINGS:
-            hs_reset_settings();
+            hs_reset_settings(WLS_RESET_CAUSE_REMOTE);
             s2m->resp = 0x00;
             break;
         case WLS_SPLIT_ACT_NONE:
