@@ -21,6 +21,11 @@
 #define HSM_KC_BT3 0x7E02
 #define HSM_KC_2G4 0x7E03
 
+/* The board's numeric mode (the `now_mode` the pin read produces in wls.c),
+ * as a `hsm_switch_pos_t`. Kept here so the resolution rule takes the switch
+ * position in one canonical form wherever it is derived. */
+hsm_switch_pos_t hsm_switch_pos_of_mode(uint8_t now_mode);
+
 uint8_t hsm_boot_devs(hsm_switch_pos_t pos, uint8_t last_bt) {
     switch (pos) {
         case HSM_SWITCH_USB:
@@ -36,6 +41,43 @@ uint8_t hsm_boot_devs(hsm_switch_pos_t pos, uint8_t last_bt) {
             /* No position reads true: keep the persisted intent (the switch may
              * be absent or mid-travel). */
             return (last_bt >= HSM_DEVS_BT1 && last_bt <= HSM_DEVS_BT5) ? last_bt : HSM_DEVS_USB;
+    }
+}
+
+/* Connection-host values (HSM_HOST_*) are defined in the header. */
+
+uint8_t hsm_host_of_devs(uint8_t devs) {
+    if (devs == HSM_DEVS_USB) {
+        return HSM_HOST_USB;
+    }
+    if (devs == HSM_DEVS_2G4) {
+        return HSM_HOST_2P4GHZ;
+    }
+    /* Every BT index, and anything unrecognised, is a wireless BT host: the
+     * default that the vendor transport falls back to. */
+    return HSM_HOST_BLUETOOTH;
+}
+
+hsm_switch_apply_t hsm_switch_apply(hsm_switch_pos_t pos, uint8_t last_bt) {
+    hsm_switch_apply_t result;
+    result.devs = hsm_boot_devs(pos, last_bt);
+    result.host = hsm_host_of_devs(result.devs);
+    return result;
+}
+
+hsm_switch_pos_t hsm_switch_pos_of_mode(uint8_t now_mode) {
+    /* Mirrors the pin read in wls.c: 3 = USB, 1 = BT, 2 = 2.4 GHz, else unknown.
+     * Any value outside the three known positions is unknown, which the rule
+     * treats as "keep the persisted intent". */
+    switch (now_mode) {
+        case 3:
+            return HSM_SWITCH_USB;
+        case 1:
+            return HSM_SWITCH_BT;
+        case 2:
+            return HSM_SWITCH_2G4;
+        default:
+            return HSM_SWITCH_UNKNOWN;
     }
 }
 

@@ -5,6 +5,7 @@
 #include "usb_descriptor.h"
 #include "lowpower_logic.h"
 #include "transport_logic.h"
+#include "connection.h"
 
 static ioline_t col_pins_left[MATRIX_COLS]  = MATRIX_COL_PINS;
 static ioline_t col_pins_right[MATRIX_COLS] = MATRIX_COL_PINS_RIGHT;
@@ -63,25 +64,33 @@ bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev) {
     switch (now_mode) {
         case 1:
             *mode = hs_bt;
-            if (sw_mode) {
-                wireless_devs_change(wireless_get_current_devs(), lsat_btdev, false);
-            }
             break;
         case 2:
             *mode = hs_2g4;
-            if (sw_mode) {
-                wireless_devs_change(wireless_get_current_devs(), DEVS_2G4, false);
-            }
             break;
         case 3:
             *mode = hs_usb;
-            if (sw_mode) wireless_devs_change(wireless_get_current_devs(), DEVS_USB, false);
-
             break;
         default:
             break;
     }
     if (sw_mode) {
+        /* The switch edge must set BOTH selectors from one read — the vendor
+         * device index (what the module is told) and upstream's connection host
+         * (which driver sends HID, and whether the USB data line is up). The
+         * rule lives once in the pure `hsm_switch_apply`; here we only apply it.
+         *
+         * This previously set only the device index, so a runtime BT->USB flip
+         * never re-engaged USB: the module dropped its radio, but
+         * `config.desired_host` stayed BLUETOOTH, `connection_host_changed_kb()`
+         * never fired, and neither half typed until a power cycle re-ran the
+         * boot path (defect 7). It is a switch-driven change, so it must NOT
+         * persist — `_noeeprom` keeps the switch from overwriting the user's
+         * stored intent (14c); only a user keycode writes EEPROM. */
+        hsm_switch_apply_t apply = hsm_switch_apply(hsm_switch_pos_of_mode(now_mode), lsat_btdev);
+        connection_set_host_noeeprom((connection_host_t)apply.host);
+        wireless_devs_change(wireless_get_current_devs(), apply.devs, false);
+
         /* `sw_mode` is the one predicate that means "the switch really moved",
          * so this is the correct place to confirm the new channel: the
          * indicator fires here and nowhere a re-assert could reach (defect:

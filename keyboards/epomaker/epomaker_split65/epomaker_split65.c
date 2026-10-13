@@ -404,9 +404,12 @@ void wireless_post_task(void) {
          * switch owns the position and is re-read every boot, and only a user
          * keycode may write the stored choice. `connection_set_host()` always
          * commits to EEPROM; `_noeeprom` is the seam that keeps the switch from
-         * overwriting the user's stored intent (14c). */
-        connection_host_t boot_host = (boot_devs == DEVS_USB) ? CONNECTION_HOST_USB : (boot_devs == DEVS_2G4) ? CONNECTION_HOST_2P4GHZ : CONNECTION_HOST_BLUETOOTH;
-        connection_set_host_noeeprom(boot_host);
+         * overwriting the user's stored intent (14c).
+         *
+         * The `devs -> host` mapping is the shared half of the one switch rule
+         * (`hsm_host_of_devs`, the same mapper the runtime switch edge and the
+         * keycode path use); it is stated once there, not re-derived here. */
+        connection_set_host_noeeprom((connection_host_t)hsm_host_of_devs(boot_devs));
         wireless_devs_change(!confinfo.devs, boot_devs, false);
         post_init_timer = 0x00;
     }
@@ -453,33 +456,33 @@ bool process_record_wls(uint16_t keycode, keyrecord_t *record) {
 #        define WLS_KEYCODE_PAIR_TIME 3000
 #    endif
 
-#    define WLS_KEYCODE_EXEC(wls_dev)                                                                                                                                  \
-        do {                                                                                                                                                           \
-            if (record->event.pressed) {                                                                                                                               \
-                /* Route through upstream's connection subsystem so it owns the                                                                                        \
-                 * persisted host choice; connection_host_changed_kb() then                                                                                            \
-                 * maps it onto the vendor device index and transport. This is the                                                                                     \
-                 * USER-intent path, so it persists (`connection_set_host`), unlike                                                                                    \
-                 * the switch read at boot which is `_noeeprom` (14c). */                                                                                              \
-                connection_host_t wls_host = (wls_dev) == DEVS_USB ? CONNECTION_HOST_USB : (wls_dev) == DEVS_2G4 ? CONNECTION_HOST_2P4GHZ : CONNECTION_HOST_BLUETOOTH; \
-                connection_set_host(wls_host);                                                                                                                         \
-                /* BT1..BT5 is the driver's sub-index, not a transport: tell the                                                                                       \
-                 * driver which profile so it owns the choice (14b). A short tap                                                                                       \
-                 * selects (reset=false); the long-press re-pairs (reset=true). */                                                                                     \
-                if ((wls_dev) >= DEVS_BT1 && (wls_dev) <= DEVS_BT5) {                                                                                                  \
-                    bluetooth_select_profile(wls_dev, false);                                                                                                          \
-                }                                                                                                                                                      \
-                wls_persist_devs();                                                                                                                                    \
-                wls_indicate_devs((wls_dev), false);                                                                                                                   \
-                if (wls_process_long_press_token == INVALID_DEFERRED_TOKEN) {                                                                                          \
-                    /* Capture the resolved target by value, not a pointer into                                                                                        \
-                     * per-keypress state (audit fix 1). */                                                                                                            \
-                    wls_process_long_press_token = defer_exec(WLS_KEYCODE_PAIR_TIME, wls_process_long_press, (void *)(uintptr_t)hsm_long_press_devs(keycode));         \
-                }                                                                                                                                                      \
-            } else {                                                                                                                                                   \
-                cancel_deferred_exec(wls_process_long_press_token);                                                                                                    \
-                wls_process_long_press_token = INVALID_DEFERRED_TOKEN;                                                                                                 \
-            }                                                                                                                                                          \
+#    define WLS_KEYCODE_EXEC(wls_dev)                                                                                                                          \
+        do {                                                                                                                                                   \
+            if (record->event.pressed) {                                                                                                                       \
+                /* Route through upstream's connection subsystem so it owns the                                                                                \
+                 * persisted host choice; connection_host_changed_kb() then                                                                                    \
+                 * maps it onto the vendor device index and transport. This is the                                                                             \
+                 * USER-intent path, so it persists (`connection_set_host`), unlike                                                                            \
+                 * the switch read at boot which is `_noeeprom` (14c). */                                                                                      \
+                connection_host_t wls_host = (connection_host_t)hsm_host_of_devs(wls_dev);                                                                     \
+                connection_set_host(wls_host);                                                                                                                 \
+                /* BT1..BT5 is the driver's sub-index, not a transport: tell the                                                                               \
+                 * driver which profile so it owns the choice (14b). A short tap                                                                               \
+                 * selects (reset=false); the long-press re-pairs (reset=true). */                                                                             \
+                if ((wls_dev) >= DEVS_BT1 && (wls_dev) <= DEVS_BT5) {                                                                                          \
+                    bluetooth_select_profile(wls_dev, false);                                                                                                  \
+                }                                                                                                                                              \
+                wls_persist_devs();                                                                                                                            \
+                wls_indicate_devs((wls_dev), false);                                                                                                           \
+                if (wls_process_long_press_token == INVALID_DEFERRED_TOKEN) {                                                                                  \
+                    /* Capture the resolved target by value, not a pointer into                                                                                \
+                     * per-keypress state (audit fix 1). */                                                                                                    \
+                    wls_process_long_press_token = defer_exec(WLS_KEYCODE_PAIR_TIME, wls_process_long_press, (void *)(uintptr_t)hsm_long_press_devs(keycode)); \
+                }                                                                                                                                              \
+            } else {                                                                                                                                           \
+                cancel_deferred_exec(wls_process_long_press_token);                                                                                            \
+                wls_process_long_press_token = INVALID_DEFERRED_TOKEN;                                                                                         \
+            }                                                                                                                                                  \
         } while (false)
 
     switch (keycode) {
@@ -1280,7 +1283,6 @@ void housekeeping_task_user(void) { // loop
 #ifdef RGB_MATRIX_ENABLE
 
 #    ifdef WIRELESS_ENABLE
-bool     wls_rgb_indicator_reset    = false;
 uint32_t wls_rgb_indicator_timer    = 0x00;
 uint32_t wls_rgb_indicator_interval = 0;
 uint32_t wls_rgb_indicator_times    = 0;
@@ -1327,8 +1329,6 @@ void wls_persist_devs(void) {
  * to the LED rail: the effect has one owner and is impossible to trigger by a
  * no-op. */
 void wls_indicate_devs(uint8_t new_devs, bool reset) {
-    wls_rgb_indicator_reset = reset;
-
     switch (new_devs) {
         case DEVS_BT1: {
             if (reset) {
@@ -1395,18 +1395,20 @@ void connection_host_changed_kb(connection_host_t host) {
     wls_usb_connect(connection_get_host() == CONNECTION_HOST_USB);
 }
 
+/* Terminal predicate for the channel flash: it decides whether a completed
+ * flash stays lit and NEVER re-arms. The flash is owed to a transition and is
+ * armed exactly once, at the transition site (`wls_indicate_devs`); when it
+ * completes it is done. Returning true here means "re-arm" — and the vendor
+ * code returned true while the module was not connected, which re-armed the
+ * flash forever: a half sitting on a non-connected channel blinked on a ~500 ms
+ * cadence for as long as it stayed disconnected, on both halves (the indicator
+ * is not master-gated). A time-driven repeat is not a channel change, so it is
+ * not this function's to make; any "still trying to connect" motion must be an
+ * explicit, bounded policy owned elsewhere, not an unbounded self-retrigger. */
 bool rgb_matrix_wls_indicator_cb(void) {
-    if (*md_getp_state() != MD_STATE_CONNECTED) {
-        /* Re-arm the same flash (do not re-run a "change") while the module is
-         * still not connected: a pairing-attempt confirmation repeats until it
-         * links, which is the indicator's own repeat policy, not a transport
-         * change. */
-        wls_indicate_devs(wireless_get_current_devs(), wls_rgb_indicator_reset);
-        return true;
+    if (*md_getp_state() == MD_STATE_CONNECTED) {
+        led_wakeup();
     }
-
-    // refresh led
-    led_wakeup();
 
     return false;
 }

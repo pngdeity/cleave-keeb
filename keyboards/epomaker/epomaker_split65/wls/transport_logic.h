@@ -23,10 +23,60 @@ typedef enum {
     HSM_SWITCH_2G4,
 } hsm_switch_pos_t;
 
+/* The switch position from the board's numeric mode (the `now_mode` a pin read
+ * produces in `wls.c`: 3 = USB, 1 = BT, 2 = 2.4 GHz, anything else = unknown).
+ * Lets every caller resolve through one canonical position type. */
+hsm_switch_pos_t hsm_switch_pos_of_mode(uint8_t now_mode);
+
 /* The device index the switch position selects at boot, given the persisted
  * sub-selection (`last_bt`) to use if the switch says BT. Returns one of
  * DEVS_USB / DEVS_BT1..5 / DEVS_2G4 (values 0..6, matching `module.h`). */
 uint8_t hsm_boot_devs(hsm_switch_pos_t pos, uint8_t last_bt);
+
+/* ---------------------------------------------------------------------------
+ * One switch position, one transport — the pair of selectors, as a pure rule.
+ *
+ * The transport is chosen by TWO selectors that must agree: the vendor device
+ * index (what the module is told) and upstream's connection host (which driver
+ * sends HID, and whether the physical USB data line is up). Every path that
+ * changes transport must set *both*, from one read of the switch, or the board
+ * routes the vendor link while sending HID through the wrong driver — "split
+ * brain". Historically the rule lived as three private copies (the boot path,
+ * the switch edge, the keycode path); the switch-edge copy had drifted to set
+ * only the device index, so a runtime BT->USB flip never re-engaged USB ("no
+ * keys on either half until a power cycle"; TODO.md defect 7).
+ *
+ * The rule is a pure function of the switch position and the persisted BT
+ * sub-index, so it is stated once here and every caller *applies* its result
+ * instead of recomputing it. The sub-index exists only because the switch
+ * cannot express which of BT1..5; all other positions ignore it.
+ * ------------------------------------------------------------------------- */
+
+/* The connection-host values this core returns, mirroring upstream's
+ * `connection_host_t` (AUTO, NONE, USB, BLUETOOTH, 2P4GHZ -- so USB = 3,
+ * BLUETOOTH = 4, 2P4GHZ = 5). Exposed so callers and tests share the vocabulary;
+ * callers cast the returned `uint8_t` to `connection_host_t`. */
+#define HSM_HOST_USB 3
+#define HSM_HOST_BLUETOOTH 4
+#define HSM_HOST_2P4GHZ 5
+
+/* The connection host a device index maps onto: USB -> USB, 2.4 GHz -> 2P4GHZ,
+ * any BT index (and anything else) -> BLUETOOTH. Values match the firmware's
+ * `connection_host_t` so the shell needs no translation. This is the single
+ * `devs -> host` mapping the board uses; it existed as three inline copies
+ * before (defect 7). */
+uint8_t hsm_host_of_devs(uint8_t devs);
+
+/* The pair the switch position selects. `devs` is the vendor device index (as
+ * `hsm_boot_devs`), `host` is the matching connection host. The caller decides
+ * whether the pair persists (a user keycode: yes) or not (the switch: no, the
+ * switch is re-read every boot and must not overwrite stored intent). */
+typedef struct {
+    uint8_t devs; /* DEVS_USB / DEVS_BT1..5 / DEVS_2G4 */
+    uint8_t host; /* CONNECTION_HOST_* */
+} hsm_switch_apply_t;
+
+hsm_switch_apply_t hsm_switch_apply(hsm_switch_pos_t pos, uint8_t last_bt);
 
 /* Whether a keycode may act, given the current switch position and target.
  * A BT key may only act in the BT position (or an unknown/forgiving one); a

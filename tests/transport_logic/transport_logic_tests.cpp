@@ -230,3 +230,46 @@ TEST_F(TransportLogic, sleep_order_is_a_pure_function_of_battery_and_charge) {
     EXPECT_FALSE(hsm_should_order_sleep(0, true, STOP));
     EXPECT_FALSE(hsm_should_order_sleep(STOP, true, STOP));
 }
+
+/* The switch selects a *pair* of selectors that must agree: the vendor device
+ * index and upstream's connection host. The defect was a switch edge that set
+ * only the index, so a runtime BT->USB flip left the host on BLUETOOTH and
+ * nothing typed until a power cycle. This pins the pair for every position. */
+TEST_F(TransportLogic, switch_position_yields_a_matched_devs_and_host_pair) {
+    /* USB: device index USB, host USB. */
+    hsm_switch_apply_t usb = hsm_switch_apply(HSM_SWITCH_USB, DEVS_BT3);
+    EXPECT_EQ(DEVS_USB, usb.devs);
+    EXPECT_EQ(HSM_HOST_USB, usb.host);
+
+    /* 2.4 GHz: device index 2.4 GHz, host 2.4 GHz, whatever was persisted. */
+    hsm_switch_apply_t g24 = hsm_switch_apply(HSM_SWITCH_2G4, DEVS_BT1);
+    EXPECT_EQ(DEVS_2G4, g24.devs);
+    EXPECT_EQ(HSM_HOST_2P4GHZ, g24.host);
+
+    /* BT: the persisted sub-index picks which of BT1..5, host BLUETOOTH. */
+    hsm_switch_apply_t bt = hsm_switch_apply(HSM_SWITCH_BT, DEVS_BT2);
+    EXPECT_EQ(DEVS_BT2, bt.devs);
+    EXPECT_EQ(HSM_HOST_BLUETOOTH, bt.host);
+}
+
+/* The host mapper is total and matches the firmware's `connection_host_t`: USB
+ * -> USB, 2.4 GHz -> 2P4GHZ, every BT index (and anything unrecognised) -> the
+ * wireless default BLUETOOTH. Non-BT positions never depend on the sub-index. */
+TEST_F(TransportLogic, host_maps_from_the_device_index) {
+    EXPECT_EQ(HSM_HOST_USB, hsm_host_of_devs(DEVS_USB));
+    EXPECT_EQ(HSM_HOST_2P4GHZ, hsm_host_of_devs(DEVS_2G4));
+    for (uint8_t bt = DEVS_BT1; bt <= DEVS_BT5; bt++) {
+        EXPECT_EQ(HSM_HOST_BLUETOOTH, hsm_host_of_devs(bt)) << "BT index " << int(bt);
+    }
+    EXPECT_EQ(HSM_HOST_BLUETOOTH, hsm_host_of_devs(0xFF));
+}
+
+/* The board's numeric pin-mode maps onto the one canonical position type; any
+ * value outside the three known positions is unknown. */
+TEST_F(TransportLogic, numeric_mode_maps_to_the_canonical_position) {
+    EXPECT_EQ(HSM_SWITCH_USB, hsm_switch_pos_of_mode(3));
+    EXPECT_EQ(HSM_SWITCH_BT, hsm_switch_pos_of_mode(1));
+    EXPECT_EQ(HSM_SWITCH_2G4, hsm_switch_pos_of_mode(2));
+    EXPECT_EQ(HSM_SWITCH_UNKNOWN, hsm_switch_pos_of_mode(0));
+    EXPECT_EQ(HSM_SWITCH_UNKNOWN, hsm_switch_pos_of_mode(7));
+}
