@@ -205,15 +205,17 @@ void keyboard_post_init_kb(void) {
      * precede it; that pass remains for boards/branches we do not reach here. */
 #    if defined(HS_BT_DEF_PIN) && defined(HS_2G4_DEF_PIN)
     {
-        uint8_t           boot_devs = hs_mode_switch_devs((confinfo.devs >= DEVS_BT1 && confinfo.devs <= DEVS_BT5) ? confinfo.devs : confinfo.last_btdevs);
-        connection_host_t boot_host = (boot_devs == DEVS_USB) ? CONNECTION_HOST_USB : (boot_devs == DEVS_2G4) ? CONNECTION_HOST_2P4GHZ : CONNECTION_HOST_BLUETOOTH;
-        connection_set_host_noeeprom(boot_host);
+        /* Seed the transport from the switch before any report can be sent: the
+         * shared applier sets BOTH selectors (host + device index) from one
+         * switch read, so no report can precede the switch's authority. */
+        uint8_t last_bt = (confinfo.devs >= DEVS_BT1 && confinfo.devs <= DEVS_BT5) ? confinfo.devs : confinfo.last_btdevs;
+        apply_switch_transport(hs_mode_switch_pos(), last_bt);
         /* Drive the USB data line from the switch level directly. When the
-         * EEPROM host already equals `boot_host`, `connection_set_host_noeeprom`
+         * EEPROM host already equals the applied host, `connection_set_host_noeeprom`
          * early-returns without firing the hook, so the line would keep its
-         * reset default (line above connects it unconditionally) on a non-USB
-         * host. Setting it here removes that dependence on the hook firing. */
-        wls_usb_connect(boot_host == CONNECTION_HOST_USB);
+         * reset default on a non-USB host. Setting it here removes that
+         * dependence on the hook firing. */
+        wls_usb_connect(connection_get_host() == CONNECTION_HOST_USB);
     }
 #    endif
     post_init_timer = timer_read32();
@@ -390,27 +392,15 @@ void wireless_post_task(void) {
         /* The physical switch is authoritative at boot. Restoring the persisted
          * index blindly let a stale wireless selection survive a reboot with the
          * switch on USB — the board came up on a dead wireless link while USB
-         * stayed enumerated ("enumerated but no keys"; defect 4). Derive the
-         * index from the switch LEVEL here; persistence still supplies the
-         * BT1..5 sub-selection the switch cannot express. */
-        uint8_t boot_devs = hs_mode_switch_devs((confinfo.devs >= DEVS_BT1 && confinfo.devs <= DEVS_BT5) ? confinfo.devs : confinfo.last_btdevs);
-        /* Two independent selectors pick the sender: the vendor device index
-         * (above) and upstream's `config.desired_host`, which resolves
-         * `host_get_active_driver()` to `bt_driver` when it is BLUETOOTH. Both
-         * must be set from the same switch read, or the board routes the vendor
-         * link correctly but sends HID through the wrong driver (split brain).
-         *
-         * This is a switch-driven change, so it must NOT persist: the physical
-         * switch owns the position and is re-read every boot, and only a user
-         * keycode may write the stored choice. `connection_set_host()` always
-         * commits to EEPROM; `_noeeprom` is the seam that keeps the switch from
-         * overwriting the user's stored intent (14c).
-         *
-         * The `devs -> host` mapping is the shared half of the one switch rule
-         * (`hsm_host_of_devs`, the same mapper the runtime switch edge and the
-         * keycode path use); it is stated once there, not re-derived here. */
-        connection_set_host_noeeprom((connection_host_t)hsm_host_of_devs(boot_devs));
-        wireless_devs_change(!confinfo.devs, boot_devs, false);
+         * stayed enumerated ("enumerated but no keys"; defect 4). The shared
+         * applier derives BOTH selectors (the vendor device index *and*
+         * upstream's `config.desired_host`, which resolves
+         * `host_get_active_driver()`) from the switch LEVEL, so they can never
+         * disagree and route HID through the wrong driver (split brain). It is a
+         * switch-driven change, so it does not persist (14c). Persistence still
+         * supplies the BT1..5 sub-selection the switch cannot express. */
+        uint8_t last_bt = (confinfo.devs >= DEVS_BT1 && confinfo.devs <= DEVS_BT5) ? confinfo.devs : confinfo.last_btdevs;
+        apply_switch_transport(hs_mode_switch_pos(), last_bt);
         post_init_timer = 0x00;
     }
 #    if defined(HS_BT_DEF_PIN) && defined(HS_2G4_DEF_PIN)

@@ -9,6 +9,7 @@
 #include "battery.h"
 #include <stdbool.h>
 #include "wireless.h"
+#include "wls/transport_logic.h"
 
 #define HS_BT_DEF_PIN C14
 #define HS_2G4_DEF_PIN C15
@@ -37,9 +38,20 @@ bool hs_mode_scan(bool update, uint8_t moude, uint8_t lsat_btdev);
  * device index and the persisted BT sub-index `last_bt`, then answers via the
  * pure `hsm_keycode_allowed`. Replaces the six private copies of the
  * seed+detect+predicate idiom in the board glue. */
-bool    hs_keycode_allowed(uint8_t target_devs, uint8_t last_bt);
-bool    hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev);
-uint8_t hs_mode_switch_devs(uint8_t lsat_btdev);
+bool hs_keycode_allowed(uint8_t target_devs, uint8_t last_bt);
+bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev);
+
+/* The physical switch position, read from the pins alone (no edge, no persisted
+ * state). The one pin read, shared by the boot seed and the transport applier. */
+hsm_switch_pos_t hs_mode_switch_pos(void);
+
+/* Apply the switch position's transport, stated once. Reads the pure
+ * `hsm_switch_apply(pos, last_bt)` and sets BOTH selectors from that single
+ * decision: upstream's connection host (`_noeeprom` — the switch must not
+ * overwrite the user's stored intent; only a keycode writes EEPROM) and the
+ * vendor device index. Every switch-driven change goes through here, so the two
+ * selectors can never be set apart (defect 7). */
+void apply_switch_transport(hsm_switch_pos_t pos, uint8_t last_bt);
 /* Restart the active link countdown (reconnect/sleep) from now, on an activity
  * event such as a keypress or wake. The countdown's policy lives in the pure
  * `hsm_link_watch`; this is only the store-back shell. */

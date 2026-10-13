@@ -75,21 +75,11 @@ bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev) {
             break;
     }
     if (sw_mode) {
-        /* The switch edge must set BOTH selectors from one read — the vendor
-         * device index (what the module is told) and upstream's connection host
-         * (which driver sends HID, and whether the USB data line is up). The
-         * rule lives once in the pure `hsm_switch_apply`; here we only apply it.
-         *
-         * This previously set only the device index, so a runtime BT->USB flip
-         * never re-engaged USB: the module dropped its radio, but
-         * `config.desired_host` stayed BLUETOOTH, `connection_host_changed_kb()`
-         * never fired, and neither half typed until a power cycle re-ran the
-         * boot path (defect 7). It is a switch-driven change, so it must NOT
-         * persist — `_noeeprom` keeps the switch from overwriting the user's
-         * stored intent (14c); only a user keycode writes EEPROM. */
-        hsm_switch_apply_t apply = hsm_switch_apply(hsm_switch_pos_of_mode(now_mode), lsat_btdev);
-        connection_set_host_noeeprom((connection_host_t)apply.host);
-        wireless_devs_change(wireless_get_current_devs(), apply.devs, false);
+        /* The switch edge applies both selectors from one read via the shared
+         * applier (defect 7: this once set only the device index, so a runtime
+         * BT->USB flip never re-engaged USB and neither half typed until a
+         * power cycle re-ran the boot path). */
+        apply_switch_transport(hsm_switch_pos_of_mode(now_mode), lsat_btdev);
 
         /* `sw_mode` is the one predicate that means "the switch really moved",
          * so this is the correct place to confirm the new channel: the
@@ -107,30 +97,36 @@ bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev) {
     return false;
 }
 
-/* Derive the device index from the physical switch LEVEL alone (no edge, no
- * persisted state). Used once at boot so the switch is authoritative over a
- * persisted `confinfo.devs`: a stale wireless index restored from EEPROM (the
- * defect-4 lockout) is corrected the moment the board comes up, instead of
- * waiting for a switch edge that never comes. The switch cannot express which
- * of BT1..5, so a BT position returns the caller's `lsat_btdev`. The decision
- * itself is the tested pure core (`transport_logic.c`); this only reads pins. */
-uint8_t hs_mode_switch_devs(uint8_t lsat_btdev) {
+/* The physical switch position, read from the pins alone (no edge, no persisted
+ * state). The one pin read, shared by the boot seed and the transport applier
+ * below. The mapping (which pin pattern is which position) is the only thing
+ * here that is not pure; the meaning of a position lives in `transport_logic.c`. */
+hsm_switch_pos_t hs_mode_switch_pos(void) {
 #if defined(HS_BT_DEF_PIN) && defined(HS_2G4_DEF_PIN)
-    hsm_switch_pos_t pos;
     if (HS_GET_MODE_PIN(HS_USB_PIN_STATE)) {
-        pos = HSM_SWITCH_USB;
+        return HSM_SWITCH_USB;
     } else if (HS_GET_MODE_PIN(HS_BT_PIN_STATE)) {
-        pos = HSM_SWITCH_BT;
+        return HSM_SWITCH_BT;
     } else if (HS_GET_MODE_PIN(HS_2G4_PIN_STATE)) {
-        pos = HSM_SWITCH_2G4;
-    } else {
-        pos = HSM_SWITCH_UNKNOWN;
+        return HSM_SWITCH_2G4;
     }
-    return hsm_boot_devs(pos, lsat_btdev);
-#else
-    (void)lsat_btdev;
-    return DEVS_USB;
 #endif
+    return HSM_SWITCH_UNKNOWN;
+}
+
+/* Apply the switch position's transport, stated once. The decision — the whole
+ * `{device index, connection host}` pair — is the pure `hsm_switch_apply`; this
+ * shell only performs it. Both selectors are set from that one decision, so they
+ * cannot drift apart (the defect-7 shape: the switch edge once set only the
+ * device index, leaving HID routed to a driver whose module was off).
+ *
+ * It is a switch-driven change, so the host write is `_noeeprom`: the switch
+ * must not overwrite the user's stored intent (14c); only a keycode writes
+ * EEPROM. */
+void apply_switch_transport(hsm_switch_pos_t pos, uint8_t last_bt) {
+    hsm_switch_apply_t apply = hsm_switch_apply(pos, last_bt);
+    connection_set_host_noeeprom((connection_host_t)apply.host);
+    wireless_devs_change(wireless_get_current_devs(), apply.devs, false);
 }
 
 static hsm_link_timers_t hs_link_timers = {0, 0};
