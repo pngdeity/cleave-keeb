@@ -205,7 +205,21 @@ bool wls_lifecycle_lpwr_allow_presleep(void) {
         }
     }
 
-    if ((wireless_get_current_devs() == DEVS_USB) && (!charging_state)) {
+    /* Drop the USB data line before sleeping, but ONLY when it is not an active
+     * host connection. The old guard was `!charging_state`, which is unsound:
+     * `HS_BAT_CABLE_PIN` is a shared "power present" bit (docs/HARDWARE.md,
+     * "Split-link power"), not a charger detect, so on a host's own USB port it
+     * can read true or false for reasons unrelated to whether the host is using
+     * the line. With the switch read UNKNOWN the applied transport is nothing,
+     * so `wireless_get_current_devs()` keeps a stale `DEVS_USB`; the old guard
+     * then held for the whole session and this hook cut a line the host was
+     * actively using, every time the low-power machine reached pre-sleep — the
+     * host saw disconnect/re-enumerate and the board came back to the same
+     * state (the periodic reset loop in docs/FINDINGS.md). A line in USB_ACTIVE
+     * is enumerated and in use; tearing it down is never a low-power action.
+     * The sibling `lpwr_is_allow_timeout()` (lowpower.c) states the same "on
+     * USB" test, so this now agrees with it instead of contradicting it. */
+    if ((wireless_get_current_devs() == DEVS_USB) && (USB_DRIVER.state != USB_ACTIVE)) {
         if (USB_DRIVER.state != USB_STOP) {
             usb_power_disconnect();
             usbDisconnectBus(&USBD1);
