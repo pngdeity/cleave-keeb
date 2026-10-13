@@ -4,6 +4,7 @@
 #include QMK_KEYBOARD_H
 #include "wls/wls.h"
 #include "wls/transport_logic.h"
+#include "wls/keymap_logic.h"
 #include "rgb_record/rgb_record.h"
 #include "quantum.h"
 #include "connection.h"
@@ -617,6 +618,83 @@ void im_rgblight_increase(void) {
     }
 }
 
+/* --- process_record_kb dispatch tables -------------------------------------
+ *
+ * Two families in `process_record_kb` were the same rule written out once per
+ * keycode (wiring review Phase C.6): the Ctrl-combo macros (MOR_1..4) and the
+ * Fn/number remap (24 keys that become a macOS media key or a Windows F-key
+ * depending on the persisted `confinfo.filp` and the current default layer).
+ * Writing them as tables keeps the mode/layer rule and the HID emission apart
+ * instead of interleaving them in a 400-line switch (CMU 18-642: don't mix mode
+ * logic with output sequences), and makes the mapping reviewable as data.
+ */
+
+/* MOR_1..4: hold Left-Ctrl plus `base` while the key is down. (The filp remap
+ * rule lives in the pure core `wls/keymap_logic`; only the Ctrl-combo family
+ * stays here, because it is a one-line effect with no layer/filp decision.) */
+static const struct {
+    uint16_t mor;
+    uint16_t base;
+} mor_map[] = {
+    {MOR_1, KC_Z},
+    {MOR_2, KC_X},
+    {MOR_3, KC_C},
+    {MOR_4, KC_V},
+};
+
+/* Perform one filp decision. The decision is the pure `filp_decide()`; this is
+ * only the effect shell. */
+static void filp_apply(const filp_action_t *act, bool pressed) {
+    switch (act->kind) {
+        case FILP_ACT_KEY:
+            /* KC_NO means "swallowed, emit nothing". */
+            if (act->key == KC_NO) {
+                return;
+            }
+            if (pressed) {
+                register_code16(act->key);
+            } else {
+                unregister_code16(act->key);
+            }
+            break;
+        case FILP_ACT_CHORD:
+            if (pressed) {
+                register_code(act->mod);
+                register_code(act->base);
+            } else {
+                unregister_code(act->mod);
+                unregister_code(act->base);
+            }
+            break;
+        case FILP_ACT_RGB_VAL:
+            if (pressed) {
+                if (act->delta < 0) {
+                    rgb_matrix_decrease_val();
+                } else {
+                    rgb_matrix_increase_val();
+                }
+            }
+            break;
+        case FILP_ACT_NONE:
+        default:
+            break;
+    }
+}
+
+/* The filp remap for `keycode`, or false if `keycode` is not a remapped key.
+ * Called only when `confinfo.filp` is set: under filp every remapped key is
+ * *replaced* by its layer-appropriate mapping (a KC_NO mapping emits nothing)
+ * and swallowed. Returns true when the key was handled. The decision itself is
+ * the pure `filp_decide()`; this function only applies it. */
+static bool process_filp_key(uint16_t keycode, keyrecord_t *record) {
+    filp_action_t act = filp_decide(keycode, keymap_is_mac_system());
+    if (act.kind == FILP_ACT_NONE) {
+        return false;
+    }
+    filp_apply(&act, record->event.pressed);
+    return true;
+}
+
 bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
     if (process_record_user(keycode, record) != true) {
         return false;
@@ -627,427 +705,27 @@ bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
         return false;
     }
 #endif
+
+    /* Ctrl-combo macros (MOR_1..4). */
+    for (size_t i = 0; i < ARRAY_SIZE(mor_map); i++) {
+        if (mor_map[i].mor == keycode) {
+            if (record->event.pressed) {
+                register_code(KC_LCTL);
+                register_code(mor_map[i].base);
+            } else {
+                unregister_code(KC_LCTL);
+                unregister_code(mor_map[i].base);
+            }
+            break;
+        }
+    }
+
+    /* The filp remap (F1..F12, digits, -/=): swallow the key when it applies. */
+    if (confinfo.filp && process_filp_key(keycode, record)) {
+        return false;
+    }
+
     switch (keycode) {
-        case MOR_1: {
-            if (record->event.pressed) {
-                register_code(KC_LCTL);
-                register_code(KC_Z);
-            } else {
-                unregister_code(KC_LCTL);
-                unregister_code(KC_Z);
-            }
-        } break;
-        case MOR_2: {
-            if (record->event.pressed) {
-                register_code(KC_LCTL);
-                register_code(KC_X);
-            } else {
-                unregister_code(KC_LCTL);
-                unregister_code(KC_X);
-            }
-        } break;
-        case MOR_3: {
-            if (record->event.pressed) {
-                register_code(KC_LCTL);
-                register_code(KC_C);
-            } else {
-                unregister_code(KC_LCTL);
-                unregister_code(KC_C);
-            }
-        } break;
-        case MOR_4: {
-            if (record->event.pressed) {
-                register_code(KC_LCTL);
-                register_code(KC_V);
-            } else {
-                unregister_code(KC_LCTL);
-                unregister_code(KC_V);
-            }
-        } break;
-        case KC_F1: {
-            if (confinfo.filp) {
-                if (keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code16(KC_MSEL);
-                    } else {
-                        unregister_code16(KC_MSEL);
-                    }
-                    return false;
-                }
-            }
-            return true;
-        } break;
-        case KC_F2: {
-            if (confinfo.filp) {
-                if (keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code16(KC_VOLD);
-                    } else {
-                        unregister_code16(KC_VOLD);
-                    }
-                    return false;
-                }
-            }
-            return true;
-        } break;
-        case KC_F3: {
-            if (confinfo.filp) {
-                if (keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code16(KC_VOLU);
-                    } else {
-                        unregister_code16(KC_VOLU);
-                    }
-                    return false;
-                }
-            }
-            return true;
-        } break;
-        case KC_F4: {
-            if (confinfo.filp) {
-                if (keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code16(KC_MUTE);
-                    } else {
-                        unregister_code16(KC_MUTE);
-                    }
-                    return false;
-                }
-            }
-            return true;
-        } break;
-        case KC_F5: {
-            if (confinfo.filp) {
-                if (keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code16(KC_MSTP);
-                    } else {
-                        unregister_code16(KC_MSTP);
-                    }
-                    return false;
-                }
-            }
-            return true;
-        } break;
-        case KC_F6: {
-            if (confinfo.filp) {
-                if (keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code16(KC_MPRV);
-                    } else {
-                        unregister_code16(KC_MPRV);
-                    }
-                    return false;
-                }
-            }
-            return true;
-        } break;
-        case KC_F7: {
-            if (confinfo.filp) {
-                if (keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code16(KC_MPLY);
-                    } else {
-                        unregister_code16(KC_MPLY);
-                    }
-                    return false;
-                }
-            }
-            return true;
-        } break;
-        case KC_F8: {
-            if (confinfo.filp) {
-                if (keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code16(KC_MNXT);
-                    } else {
-                        unregister_code16(KC_MNXT);
-                    }
-                    return false;
-                }
-            }
-            return true;
-        } break;
-        case KC_F9: {
-            if (confinfo.filp) {
-                if (keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code16(KC_MAIL);
-                    } else {
-                        unregister_code16(KC_MAIL);
-                    }
-                    return false;
-                }
-            }
-            return true;
-        } break;
-        case KC_F10: {
-            if (confinfo.filp) {
-                if (keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code16(KC_WHOM);
-                    } else {
-                        unregister_code16(KC_WHOM);
-                    }
-                    return false;
-                }
-            }
-            return true;
-        } break;
-        case KC_F11: {
-            if (confinfo.filp) {
-                if (keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code16(KC_CALC);
-                    } else {
-                        unregister_code16(KC_CALC);
-                    }
-                    return false;
-                }
-            }
-            return true;
-        } break;
-        case KC_F12: {
-            if (confinfo.filp) {
-                if (keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code16(KC_WSCH);
-                    } else {
-                        unregister_code16(KC_WSCH);
-                    }
-                    return false;
-                }
-            }
-            return true;
-        } break;
-        case KC_1: {
-            if (confinfo.filp) {
-                if (!keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code(KC_F1);
-                    } else {
-                        unregister_code(KC_F1);
-                    }
-                } else {
-                    if (record->event.pressed) {
-                        register_code(KC_BRID);
-                    } else {
-                        unregister_code(KC_BRID);
-                    }
-                }
-                return false;
-            }
-            return true;
-        } break;
-        case KC_2: {
-            if (confinfo.filp) {
-                if (!keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code(KC_F2);
-                    } else {
-                        unregister_code(KC_F2);
-                    }
-                } else {
-                    if (record->event.pressed) {
-                        register_code(KC_BRIU);
-                    } else {
-                        unregister_code(KC_BRIU);
-                    }
-                }
-                return false;
-            }
-            return true;
-        } break;
-        case KC_3: {
-            if (confinfo.filp) {
-                if (!keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code(KC_F3);
-                    } else {
-                        unregister_code(KC_F3);
-                    }
-                } else {
-                    if (record->event.pressed) {
-                        register_code(KC_LGUI);
-                        register_code(KC_TAB);
-                    } else {
-                        unregister_code(KC_LGUI);
-                        unregister_code(KC_TAB);
-                    }
-                }
-                return false;
-            }
-            return true;
-        } break;
-        case KC_4: {
-            if (confinfo.filp) {
-                if (!keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code(KC_F4);
-                    } else {
-                        unregister_code(KC_F4);
-                    }
-                } else {
-                    if (record->event.pressed) {
-                        register_code(KC_LGUI);
-                        register_code(KC_E);
-                    } else {
-                        unregister_code(KC_LGUI);
-                        unregister_code(KC_E);
-                    }
-                }
-                return false;
-            }
-            return true;
-        } break;
-        case KC_5: {
-            if (confinfo.filp) {
-                if (!keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code(KC_F5);
-                    } else {
-                        unregister_code(KC_F5);
-                    }
-                } else {
-                    if (record->event.pressed) {
-                        rgb_matrix_decrease_val();
-                    }
-                }
-                return false;
-            }
-            return true;
-        } break;
-        case KC_6: {
-            if (confinfo.filp) {
-                if (!keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code(KC_F6);
-                    } else {
-                        unregister_code(KC_F6);
-                    }
-                } else {
-                    if (record->event.pressed) {
-                        rgb_matrix_increase_val();
-                    }
-                }
-                return false;
-            }
-            return true;
-        } break;
-        case KC_7: {
-            if (confinfo.filp) {
-                if (!keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code(KC_F7);
-                    } else {
-                        unregister_code(KC_F7);
-                    }
-                } else {
-                    if (record->event.pressed) {
-                        register_code(KC_MPRV);
-                    } else {
-                        unregister_code(KC_MPRV);
-                    }
-                }
-                return false;
-            }
-            return true;
-        } break;
-        case KC_8: {
-            if (confinfo.filp) {
-                if (!keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code(KC_F8);
-                    } else {
-                        unregister_code(KC_F8);
-                    }
-                } else {
-                    if (record->event.pressed) {
-                        register_code(KC_MPLY);
-                    } else {
-                        unregister_code(KC_MPLY);
-                    }
-                }
-                return false;
-            }
-            return true;
-        } break;
-        case KC_9: {
-            if (confinfo.filp) {
-                if (!keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code(KC_F9);
-                    } else {
-                        unregister_code(KC_F9);
-                    }
-                } else {
-                    if (record->event.pressed) {
-                        register_code(KC_MNXT);
-                    } else {
-                        unregister_code(KC_MNXT);
-                    }
-                }
-                return false;
-            }
-            return true;
-        } break;
-        case KC_0: {
-            if (confinfo.filp) {
-                if (!keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code(KC_F10);
-                    } else {
-                        unregister_code(KC_F10);
-                    }
-                } else {
-                    if (record->event.pressed) {
-                        register_code(KC_MUTE);
-                    } else {
-                        unregister_code(KC_MUTE);
-                    }
-                }
-                return false;
-            }
-            return true;
-        } break;
-        case KC_MINS: {
-            if (confinfo.filp) {
-                if (!keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code(KC_F11);
-                    } else {
-                        unregister_code(KC_F11);
-                    }
-                } else {
-                    if (record->event.pressed) {
-                        register_code(KC_VOLD);
-                    } else {
-                        unregister_code(KC_VOLD);
-                    }
-                }
-                return false;
-            }
-            return true;
-        } break;
-        case KC_EQL: {
-            if (confinfo.filp) {
-                if (!keymap_is_mac_system()) {
-                    if (record->event.pressed) {
-                        register_code(KC_F12);
-                    } else {
-                        unregister_code(KC_F12);
-                    }
-                } else {
-                    if (record->event.pressed) {
-                        register_code(KC_VOLU);
-                    } else {
-                        unregister_code(KC_VOLU);
-                    }
-                }
-                return false;
-            }
-            return true;
-        } break;
         case KC_FILP: {
             if (record->event.pressed) {
                 confinfo.filp = !confinfo.filp;
