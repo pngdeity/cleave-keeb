@@ -213,13 +213,12 @@ void keyboard_post_init_kb(void) {
          * shared applier sets BOTH selectors (host + device index) from one
          * switch read, so no report can precede the switch's authority. */
         uint8_t last_bt = (confinfo.devs >= DEVS_BT1 && confinfo.devs <= DEVS_BT5) ? confinfo.devs : confinfo.last_btdevs;
-        apply_switch_transport(hs_mode_switch_pos(), last_bt);
-        /* Drive the USB data line from the switch level directly. When the
-         * EEPROM host already equals the applied host, `connection_set_host_noeeprom`
-         * early-returns without firing the hook, so the line would keep its
-         * reset default on a non-USB host. Setting it here removes that
-         * dependence on the hook firing. */
-        wls_usb_connect(connection_get_host() == CONNECTION_HOST_USB);
+        /* Drive the USB data line from the host we *applied*, not from a re-read
+         * of `connection_get_host()`: `connection_set_host_noeeprom` early-returns
+         * when EEPROM already holds that host, so a re-read can be stale and drop
+         * the line. One read, one decision, applied consistently. */
+        connection_host_t applied = apply_switch_transport(hs_mode_switch_pos(), last_bt);
+        wls_usb_connect(applied == CONNECTION_HOST_USB);
     }
 #    endif
     post_init_timer = timer_read32();

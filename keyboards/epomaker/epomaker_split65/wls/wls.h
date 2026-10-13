@@ -10,6 +10,7 @@
 #include <stdbool.h>
 #include "wireless.h"
 #include "wls/transport_logic.h"
+#include "connection.h"
 
 #define HS_BT_DEF_PIN C14
 #define HS_2G4_DEF_PIN C15
@@ -64,7 +65,7 @@ hsm_switch_pos_t hs_mode_switch_pos(void);
  * overwrite the user's stored intent; only a keycode writes EEPROM) and the
  * vendor device index. Every switch-driven change goes through here, so the two
  * selectors can never be set apart (defect 7). */
-void apply_switch_transport(hsm_switch_pos_t pos, uint8_t last_bt);
+connection_host_t apply_switch_transport(hsm_switch_pos_t pos, uint8_t last_bt);
 /* Restart the active link countdown (reconnect/sleep) from now, on an activity
  * event such as a keypress or wake. The countdown's policy lives in the pure
  * `hsm_link_watch`; this is only the store-back shell. */

@@ -123,10 +123,17 @@ hsm_switch_pos_t hs_mode_switch_pos(void) {
  * It is a switch-driven change, so the host write is `_noeeprom`: the switch
  * must not overwrite the user's stored intent (14c); only a keycode writes
  * EEPROM. */
-void apply_switch_transport(hsm_switch_pos_t pos, uint8_t last_bt) {
+connection_host_t apply_switch_transport(hsm_switch_pos_t pos, uint8_t last_bt) {
     hsm_switch_apply_t apply = hsm_switch_apply(pos, last_bt);
     connection_set_host_noeeprom((connection_host_t)apply.host);
     wireless_devs_change(wireless_get_current_devs(), apply.devs, false);
+    /* Return the host we *applied*, not the live one. `connection_set_host_noeeprom`
+     * early-returns when EEPROM already holds this host, so a caller that
+     * re-reads `connection_get_host()` can observe a stale value and mis-drive
+     * the USB line (the Phase A.2 boot-site regression: an unsettled pin read
+     * yields UNKNOWN -> BLUETOOTH, the write no-ops, and a re-read then drops
+     * USB). The applied host is the one decision, and every caller must use it. */
+    return (connection_host_t)apply.host;
 }
 
 static hsm_link_timers_t hs_link_timers = {0, 0};
