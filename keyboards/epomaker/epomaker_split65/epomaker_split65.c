@@ -429,18 +429,14 @@ uint32_t wls_process_long_press(uint32_t trigger_time, void *cb_arg) {
     uint8_t devs = (uint8_t)(uintptr_t)cb_arg;
 
     if (devs >= DEVS_BT1 && devs <= DEVS_BT5) {
-        uint8_t mode = hsm_mode_seed(wireless_get_current_devs());
-        hs_modeio_detection(true, &mode, hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
-        if ((mode == hs_bt) || (mode == hs_wireless) || (mode == hs_none)) {
+        if (hs_keycode_allowed(devs, confinfo.last_btdevs)) {
             /* Re-pair the profile the driver already owns (14b): select it with
              * reset=true so the module gets CLEAN + devinfo + PAIR. */
             bluetooth_select_profile(devs, true);
             wls_indicate_devs(devs, true);
         }
     } else if (devs == DEVS_2G4) {
-        uint8_t mode = hsm_mode_seed(wireless_get_current_devs());
-        hs_modeio_detection(true, &mode, hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
-        if ((mode == hs_2g4) || (mode == hs_wireless) || (mode == hs_none)) {
+        if (hs_keycode_allowed(devs, confinfo.last_btdevs)) {
             wireless_devs_change(wireless_get_current_devs(), DEVS_2G4, true);
             wls_indicate_devs(DEVS_2G4, true);
         }
@@ -487,34 +483,26 @@ bool process_record_wls(uint16_t keycode, keyrecord_t *record) {
 
     switch (keycode) {
         case KC_BT1: {
-            uint8_t mode = hsm_mode_seed(wireless_get_current_devs());
-            hs_modeio_detection(true, &mode, hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
-            if ((mode == hs_bt) || (mode == hs_wireless) || (mode == hs_none)) {
+            if (hs_keycode_allowed(DEVS_BT1, confinfo.last_btdevs)) {
                 WLS_KEYCODE_EXEC(DEVS_BT1);
                 hs_link_activity();
             }
 
         } break;
         case KC_BT2: {
-            uint8_t mode = hsm_mode_seed(wireless_get_current_devs());
-            hs_modeio_detection(true, &mode, hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
-            if ((mode == hs_bt) || (mode == hs_wireless) || (mode == hs_none)) {
+            if (hs_keycode_allowed(DEVS_BT2, confinfo.last_btdevs)) {
                 WLS_KEYCODE_EXEC(DEVS_BT2);
                 hs_link_activity();
             }
         } break;
         case KC_BT3: {
-            uint8_t mode = hsm_mode_seed(wireless_get_current_devs());
-            hs_modeio_detection(true, &mode, hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
-            if ((mode == hs_bt) || (mode == hs_wireless) || (mode == hs_none)) {
+            if (hs_keycode_allowed(DEVS_BT3, confinfo.last_btdevs)) {
                 WLS_KEYCODE_EXEC(DEVS_BT3);
                 hs_link_activity();
             }
         } break;
         case KC_2G4: {
-            uint8_t mode = hsm_mode_seed(wireless_get_current_devs());
-            hs_modeio_detection(true, &mode, hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
-            if ((mode == hs_2g4) || (mode == hs_wireless) || (mode == hs_none)) {
+            if (hs_keycode_allowed(DEVS_2G4, confinfo.last_btdevs)) {
                 WLS_KEYCODE_EXEC(DEVS_2G4);
                 hs_link_activity();
             }

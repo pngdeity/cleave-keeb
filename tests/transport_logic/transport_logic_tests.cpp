@@ -273,3 +273,33 @@ TEST_F(TransportLogic, numeric_mode_maps_to_the_canonical_position) {
     EXPECT_EQ(HSM_SWITCH_UNKNOWN, hsm_switch_pos_of_mode(0));
     EXPECT_EQ(HSM_SWITCH_UNKNOWN, hsm_switch_pos_of_mode(7));
 }
+
+/* The detector's *output* mode (wls.h `enum modeio_mode`: hs_none=0, hs_usb=1,
+ * hs_bt=2, hs_2g4=3, hs_wireless=4) maps onto the canonical position. This is a
+ * different numbering from the raw pin read above, so it has its own mapper;
+ * `hs_wireless` is an input mode the detector never emits and maps to unknown. */
+TEST_F(TransportLogic, detector_output_mode_maps_to_the_canonical_position) {
+    enum { HS_NONE = 0, HS_USB = 1, HS_BT = 2, HS_2G4 = 3, HS_WIRELESS = 4 };
+    EXPECT_EQ(HSM_SWITCH_USB, hsm_switch_pos_of_hs_mode(HS_USB));
+    EXPECT_EQ(HSM_SWITCH_BT, hsm_switch_pos_of_hs_mode(HS_BT));
+    EXPECT_EQ(HSM_SWITCH_2G4, hsm_switch_pos_of_hs_mode(HS_2G4));
+    EXPECT_EQ(HSM_SWITCH_UNKNOWN, hsm_switch_pos_of_hs_mode(HS_NONE));
+    EXPECT_EQ(HSM_SWITCH_UNKNOWN, hsm_switch_pos_of_hs_mode(HS_WIRELESS));
+    EXPECT_EQ(HSM_SWITCH_UNKNOWN, hsm_switch_pos_of_hs_mode(0xFF));
+}
+
+/* The switch gate, as the board composes it: position (from the detector) plus
+ * target. A BT key acts only in the BT position, a 2.4 GHz key only in the
+ * 2.4 GHz position, and an unreadable switch is forgiving — the rule the six
+ * inline copies in the board glue all expressed. */
+TEST_F(TransportLogic, keycode_gate_permits_only_the_matching_position) {
+    EXPECT_FALSE(hsm_keycode_allowed(HSM_SWITCH_USB, DEVS_BT1));
+    EXPECT_FALSE(hsm_keycode_allowed(HSM_SWITCH_USB, DEVS_2G4));
+    EXPECT_TRUE(hsm_keycode_allowed(HSM_SWITCH_BT, DEVS_BT1));
+    EXPECT_TRUE(hsm_keycode_allowed(HSM_SWITCH_BT, DEVS_BT5));
+    EXPECT_FALSE(hsm_keycode_allowed(HSM_SWITCH_BT, DEVS_2G4));
+    EXPECT_TRUE(hsm_keycode_allowed(HSM_SWITCH_2G4, DEVS_2G4));
+    EXPECT_FALSE(hsm_keycode_allowed(HSM_SWITCH_2G4, DEVS_BT1));
+    EXPECT_TRUE(hsm_keycode_allowed(HSM_SWITCH_UNKNOWN, DEVS_BT1));
+    EXPECT_TRUE(hsm_keycode_allowed(HSM_SWITCH_UNKNOWN, DEVS_2G4));
+}

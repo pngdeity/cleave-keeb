@@ -81,6 +81,24 @@ hsm_switch_pos_t hsm_switch_pos_of_mode(uint8_t now_mode) {
     }
 }
 
+hsm_switch_pos_t hsm_switch_pos_of_hs_mode(uint8_t hs_mode) {
+    /* The detector's output vocabulary (`enum modeio_mode`): hs_usb=1, hs_bt=2,
+     * hs_2g4=3. `hs_none`/`hs_wireless`/anything else -> unknown. Note this is a
+     * *different* numbering from `hsm_switch_pos_of_mode`: the pin read uses
+     * 1=BT/2=2.4G/3=USB, the enum uses its declaration order. Keeping the two
+     * named separately is what stops the two vocabularies being conflated. */
+    switch (hs_mode) {
+        case 1: /* hs_usb */
+            return HSM_SWITCH_USB;
+        case 2: /* hs_bt */
+            return HSM_SWITCH_BT;
+        case 3: /* hs_2g4 */
+            return HSM_SWITCH_2G4;
+        default: /* hs_none, hs_wireless, anything else */
+            return HSM_SWITCH_UNKNOWN;
+    }
+}
+
 bool hsm_keycode_allowed(hsm_switch_pos_t pos, uint8_t target_devs) {
     bool target_is_bt  = (target_devs >= HSM_DEVS_BT1 && target_devs <= HSM_DEVS_BT5);
     bool target_is_2g4 = (target_devs == HSM_DEVS_2G4);

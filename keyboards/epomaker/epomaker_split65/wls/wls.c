@@ -144,6 +144,23 @@ bool hs_mode_scan(bool update, uint8_t moude, uint8_t lsat_btdev) {
     return false;
 }
 
+bool hs_keycode_allowed(uint8_t target_devs, uint8_t last_bt) {
+    /* The switch gate, stated once. Every wireless keycode asked the same
+     * three-part question inline — seed the detector from the live device index,
+     * read the switch position, and test whether that position permits this
+     * target — and answered it with six private copies of the predicate
+     * (defect-7's shape: a rule written N times). The decision itself is the
+     * tested pure `hsm_keycode_allowed`; this only supplies it the switch
+     * position, mapped from the detector's output vocabulary.
+     *
+     * `last_bt` is the persisted BT sub-index, which the switch cannot express
+     * and which lives in board state (`confinfo`); the caller passes it in so
+     * this file stays free of board-only globals. */
+    uint8_t mode = hsm_mode_seed(wireless_get_current_devs());
+    hs_modeio_detection(true, &mode, hsm_seed_btdev(wireless_get_current_devs(), last_bt));
+    return hsm_keycode_allowed(hsm_switch_pos_of_hs_mode(mode), target_devs);
+}
+
 /* Map the module's MD_STATE_* onto the pure core's link-state enum. */
 static hsm_link_state_t hs_link_state(void) {
     switch (*md_getp_state()) {

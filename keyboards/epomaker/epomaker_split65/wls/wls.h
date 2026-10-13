@@ -10,25 +10,19 @@
 #include <stdbool.h>
 #include "wireless.h"
 
-#define HS_BT_DEF_PIN                     C14
-#define HS_2G4_DEF_PIN                    C15
-#define HS_BT_PIN_STATE                   0, 1
-#define HS_2G4_PIN_STATE                  1, 0
-#define HS_USB_PIN_STATE                  1, 1
+#define HS_BT_DEF_PIN C14
+#define HS_2G4_DEF_PIN C15
+#define HS_BT_PIN_STATE 0, 1
+#define HS_2G4_PIN_STATE 1, 0
+#define HS_USB_PIN_STATE 1, 1
 
 #define HS_GET_MODE_PIN_(pin_bt, pin_2g4) ((((#pin_bt)[0] == 'x') || ((gpio_read_pin(HS_BT_DEF_PIN) + 0x30) == ((#pin_bt)[0]))) && (((#pin_2g4)[0] == 'x') || ((gpio_read_pin(HS_2G4_DEF_PIN) + 0x30) == ((#pin_2g4)[0]))))
-#define HS_GET_MODE_PIN(state)            HS_GET_MODE_PIN_(state)
-#define HS_MODEIO_DETECTION_TIME          50
-#define HS_LBACK_TIMEOUT                  (30 * 1000)
-#define HS_SLEEP_TIMEOUT                  (1 * 60000) //(1 * 60000)
+#define HS_GET_MODE_PIN(state) HS_GET_MODE_PIN_(state)
+#define HS_MODEIO_DETECTION_TIME 50
+#define HS_LBACK_TIMEOUT (30 * 1000)
+#define HS_SLEEP_TIMEOUT (1 * 60000) //(1 * 60000)
 
-enum modeio_mode {
-    hs_none = 0,
-    hs_usb,
-    hs_bt,
-    hs_2g4,
-    hs_wireless
-};
+enum modeio_mode { hs_none = 0, hs_usb, hs_bt, hs_2g4, hs_wireless };
 
 extern bool charging_state;
 extern bool bat_full_flag;
@@ -38,7 +32,13 @@ void wls_order_sleep(bool ordered);
 bool wls_sleep_ordered(void);
 bool hs_rgb_blink_hook(void);
 bool hs_mode_scan(bool update, uint8_t moude, uint8_t lsat_btdev);
-bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev);
+/* The switch gate, stated once: may a wireless keycode for `target_devs` act,
+ * given the switch position the detector reads? Seeds the detector from the live
+ * device index and the persisted BT sub-index `last_bt`, then answers via the
+ * pure `hsm_keycode_allowed`. Replaces the six private copies of the
+ * seed+detect+predicate idiom in the board glue. */
+bool    hs_keycode_allowed(uint8_t target_devs, uint8_t last_bt);
+bool    hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev);
 uint8_t hs_mode_switch_devs(uint8_t lsat_btdev);
 /* Restart the active link countdown (reconnect/sleep) from now, on an activity
  * event such as a keypress or wake. The countdown's policy lives in the pure
@@ -59,7 +59,7 @@ uint8_t bluetooth_get_profile(void);
  * RAW_EPSIZE bytes; only the following are meaningful, the rest are zero. */
 #define KB_BATTERY_CMD_GET 0xA4
 
-#define KB_BATTERY_IDX_CMD   0
+#define KB_BATTERY_IDX_CMD 0
 #define KB_BATTERY_IDX_LEVEL 1
 #define KB_BATTERY_IDX_CHARGE 4
 #define KB_BATTERY_IDX_TRANSPORT 5
@@ -70,8 +70,8 @@ uint8_t bluetooth_get_profile(void);
  * working BLE link, so they are exposed here: index 7 = upstream's
  * `config.desired_host` (CONNECTION_HOST_* raw value), index 8 = the BT driver's
  * active profile (DEVS_BT1..BT5). Both are test-only and may be reclaimed. */
-#define KB_BATTERY_IDX_HOST   7
-#define KB_BATTERY_IDX_BTSUB  8
+#define KB_BATTERY_IDX_HOST 7
+#define KB_BATTERY_IDX_BTSUB 8
 
 /* Module fingerprint (see docs/PROTOCOL.md). The CH582F module is the source of
  * the Bluetooth faults and its image is closed and undumpable, so its identity
@@ -79,7 +79,7 @@ uint8_t bluetooth_get_profile(void);
  * image does not answer that query), index 10 = the module link state (`0x5B`
  * sub-code range, i.e. the MD_STATE_* value). Read-only diagnostics. */
 #define KB_BATTERY_IDX_MD_VERSION 9
-#define KB_BATTERY_IDX_MD_STATE   10
+#define KB_BATTERY_IDX_MD_STATE 10
 
 /* KB_BATTERY_IDX_CHARGE */
 enum kb_battery_charge {
@@ -90,7 +90,7 @@ enum kb_battery_charge {
 
 /* KB_BATTERY_IDX_TRANSPORT */
 #define KB_BATTERY_TRANSPORT_USB 0x01
-#define KB_BATTERY_TRANSPORT_BT  0x02
+#define KB_BATTERY_TRANSPORT_BT 0x02
 #define KB_BATTERY_TRANSPORT_2G4 0x04
 
 /* Identifies the keyboard model in the battery report (see PROTOCOL.md).
@@ -111,6 +111,6 @@ typedef struct {
     uint8_t transport;
 } kb_battery_snapshot_t;
 
-void    kb_battery_snapshot(kb_battery_snapshot_t *out);
-bool    kb_battery_changed(const kb_battery_snapshot_t *snap);
-void    kb_battery_push_task(void);
+void kb_battery_snapshot(kb_battery_snapshot_t *out);
+bool kb_battery_changed(const kb_battery_snapshot_t *snap);
+void kb_battery_push_task(void);

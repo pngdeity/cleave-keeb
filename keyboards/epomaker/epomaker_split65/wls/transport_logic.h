@@ -84,6 +84,15 @@ hsm_switch_apply_t hsm_switch_apply(hsm_switch_pos_t pos, uint8_t last_bt);
  * modes the switch does not allow. */
 bool hsm_keycode_allowed(hsm_switch_pos_t pos, uint8_t target_devs);
 
+/* The switch position for the *detector's output* mode (`wls.c`'s modeio_mode:
+ * hs_none=0, hs_usb=1, hs_bt=2, hs_2g4=3, hs_wireless=4). Distinct from
+ * `hsm_switch_pos_of_mode`, which maps the raw pin read (1=BT, 2=2.4G, 3=USB);
+ * the detector's output uses the enum's own numbering, so the two must not be
+ * conflated. `hs_wireless` is an input mode the detector never emits, so it maps
+ * to UNKNOWN; `hs_none` (pins unreadable) also maps to UNKNOWN, which the rules
+ * treat as the forgiving/keep-persisted case. */
+hsm_switch_pos_t hsm_switch_pos_of_hs_mode(uint8_t hs_mode);
+
 /* The device index a wireless keycode re-pairs on a long-press, or -1 when the
  * keycode has no long-press action. Pure: the keycode alone decides the target,
  * so the caller can capture the value at arm time instead of holding a pointer
