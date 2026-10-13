@@ -7,11 +7,6 @@
 #include "usb_device_state.h"
 #include "transport.h"
 
-/* Board-provided USB data-line connect/disconnect primitive (item 14d). The
- * vendor `set_transport()` swap is gone; the physical side of a host change is
- * the board's, declared here so the shared stack can drive it at boot. */
-void wls_usb_connect(bool enable);
-
 #ifndef WLS_INQUIRY_BAT_TIME
 #    define WLS_INQUIRY_BAT_TIME 3000
 #endif
@@ -21,10 +16,10 @@ static uint8_t wls_devs = DEVS_USB;
 void last_matrix_activity_trigger(void);
 
 uint8_t wireless_keyboard_leds(void);
-void wireless_send_keyboard(report_keyboard_t *report);
-void wireless_send_nkro(report_nkro_t *report);
-void wireless_send_mouse(report_mouse_t *report);
-void wireless_send_extra(report_extra_t *report);
+void    wireless_send_keyboard(report_keyboard_t *report);
+void    wireless_send_nkro(report_nkro_t *report);
+void    wireless_send_mouse(report_mouse_t *report);
+void    wireless_send_extra(report_extra_t *report);
 
 host_driver_t wireless_driver = {
     .keyboard_leds = wireless_keyboard_leds,
@@ -35,12 +30,10 @@ host_driver_t wireless_driver = {
 };
 
 void wireless_init(void) {
-
     md_init();
 }
 
 uint8_t wireless_keyboard_leds(void) {
-
     if (*md_getp_state() == MD_STATE_CONNECTED) {
         return *md_getp_indicator();
     }
@@ -63,8 +56,8 @@ void wireless_send_keyboard(report_keyboard_t *report) {
 }
 
 void wireless_send_nkro(report_nkro_t *report) {
-    static report_keyboard_t temp_report_keyboard = {0};
-    uint8_t wls_report_nkro[MD_SND_CMD_NKRO_LEN]  = {0};
+    static report_keyboard_t temp_report_keyboard                 = {0};
+    uint8_t                  wls_report_nkro[MD_SND_CMD_NKRO_LEN] = {0};
 
     if (*md_getp_state() != MD_STATE_CONNECTED) {
         wireless_devs_change(wls_devs, wls_devs, false);
@@ -73,7 +66,7 @@ void wireless_send_nkro(report_nkro_t *report) {
 
     if (report != NULL) {
         report_nkro_t temp_report_nkro = *report;
-        uint8_t key_count              = 0;
+        uint8_t       key_count        = 0;
 
         temp_report_keyboard.mods = temp_report_nkro.mods;
         for (uint8_t i = 0; i < NKRO_REPORT_BITS; i++) {
@@ -86,7 +79,8 @@ void wireless_send_nkro(report_nkro_t *report) {
             uint8_t n;
 
             for (uint8_t c = 0; c < key_count; c++) {
-                for (n = 0; n < NKRO_REPORT_BITS && !temp_report_nkro.bits[n]; n++) {}
+                for (n = 0; n < NKRO_REPORT_BITS && !temp_report_nkro.bits[n]; n++) {
+                }
                 /* Guard the read: the set can empty before the count runs out, so
                  * `n` may reach NKRO_REPORT_BITS; indexing `bits[n]` then is out
                  * of bounds (found by the sanitizer, wiring review Phase C.7). */
@@ -116,7 +110,8 @@ void wireless_send_nkro(report_nkro_t *report) {
             uint8_t usageid;
             uint8_t idx, n = 0;
 
-            for (n = 0; n < NKRO_REPORT_BITS && !temp_report_nkro.bits[n]; n++) {}
+            for (n = 0; n < NKRO_REPORT_BITS && !temp_report_nkro.bits[n]; n++) {
+            }
             /* Same guard as above: never index `bits[NKRO_REPORT_BITS]`. */
             if (n >= NKRO_REPORT_BITS) {
                 break;
@@ -149,10 +144,10 @@ void wireless_send_nkro(report_nkro_t *report) {
 void wireless_send_mouse(report_mouse_t *report) {
     typedef struct {
         uint8_t buttons;
-        int8_t x;
-        int8_t y;
-        int8_t z;
-        int8_t h;
+        int8_t  x;
+        int8_t  y;
+        int8_t  z;
+        int8_t  h;
     } __attribute__((packed)) wls_report_mouse_t;
 
     wls_report_mouse_t wls_report_mouse = {0};
@@ -233,17 +228,16 @@ void wireless_post_task(void) __attribute__((weak));
 void wireless_post_task(void) {}
 
 void wireless_task(void) {
-    static bool usb_initialized = false;
-
-    if (!usb_initialized) {
-        /* One-time: bring the USB data line up for the initial host. Upstream's
-         * `host_init()`/`connection_init()` run before post-init, so the mode
-         * switch has not been read yet; `connection_host_changed_kb()` does the
-         * real connect once the switch is applied, and this guard only covers
-         * boards whose switch resolve leaves the host at USB. */
-        wls_usb_connect(connection_get_host() == CONNECTION_HOST_USB);
-        usb_initialized = true;
-    }
+    /* The USB data line has exactly ONE owner: the board's
+     * `connection_host_changed_kb()`, fired by `handle_host_changed()` on every
+     * host change, plus the board's boot seed for the case where the stored host
+     * already equals the switch's choice (so `handle_host_changed()` early-returns
+     * and never fires). A one-time guard here used to be a SECOND enforcer of the
+     * same rule, reading `connection_get_host()` on a different schedule — two
+     * enforcers of one decision is the shape that produced the boot self-detach
+     * (see docs/FINDINGS.md, "the boot switch read is un-settled"). It was
+     * redundant with the boot seed, which now drives the line unconditionally on a
+     * settled read, so it is deleted rather than kept as a second reader. */
 
     wireless_pre_task();
     lpwr_task();
@@ -267,6 +261,5 @@ void wireless_task(void) {
 }
 
 void housekeeping_task_kb(void) {
-
     wireless_task();
 }
