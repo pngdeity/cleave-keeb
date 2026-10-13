@@ -67,13 +67,17 @@ void rgb_matrix_hs_set_remain_time(uint8_t index, uint8_t remain_time);
 #define keymap_is_mac_system() ((get_highest_layer(default_layer_state) == _MBL) || (get_highest_layer(default_layer_state) == _MFL))
 #define keymap_is_base_layer() ((get_highest_layer(default_layer_state) == _BL) || (get_highest_layer(default_layer_state) == _FL))
 
-uint32_t        post_init_timer       = 0x00;
-bool            mac_status            = false;
-bool            charging_state        = false;
-bool            bat_full_flag         = false;
-bool            enable_bat_indicators = true;
-uint32_t        bat_indicator_cnt     = 0;
-static uint32_t ee_clr_timer          = 0;
+uint32_t post_init_timer = 0x00;
+bool     mac_status      = false;
+bool     charging_state  = false;
+bool     bat_full_flag   = false;
+/* The battery indicator's suppression deadline (0 = not suppressed). Set to
+ * "now + WLS_BAT_SUPPRESS_MS" by an EEPROM reset; the indicator is hidden while
+ * `timer_read32() < bat_suppress_until`. One deadline read as a comparison by
+ * the shell, instead of a bool plus a parallel timer kept in lockstep and
+ * re-derived every frame. */
+static uint32_t bat_suppress_until = 0;
+static uint32_t ee_clr_timer       = 0;
 bool            no_record_fg;
 uint8_t         pov;
 static bool     im_bat_req_charging_flag = false;
@@ -1242,7 +1246,7 @@ void housekeeping_task_user(void) { // loop
         hs_now_mode = MD_SND_CMD_DEVCTRL_CHARGING_STOP;
     }
 
-    if (!hs_current_time || timer_elapsed32(hs_current_time) > 1000) {
+    if (!hs_current_time || timer_elapsed32(hs_current_time) > WLS_MODULE_POLL_MS) {
         hs_current_time = timer_read32();
         md_send_devctrl(hs_now_mode);
         md_send_devctrl(MD_SND_CMD_DEVCTRL_INQVOL);
@@ -1639,17 +1643,13 @@ bool rgb_matrix_indicators_advanced_kb(uint8_t led_min, uint8_t led_max) {
 #ifdef WIRELESS_ENABLE
     rgb_matrix_wls_indicator();
 
-    if (enable_bat_indicators && !rgbrec_is_started()) {
+    /* While suppressed (post-reset) the battery indicator is hidden; the
+     * suppression is a deadline, so it simply expires — no re-arm, no flag to
+     * flip back. Otherwise the indicator is shown and its own bounded blink
+     * (rgb_matrix_hs_bat) drives the cadence. */
+    if (timer_read32() >= bat_suppress_until && !rgbrec_is_started()) {
         rgb_matrix_hs_bat();
         bat_indicators();
-        bat_indicator_cnt = timer_read32();
-    }
-
-    if (!enable_bat_indicators) {
-        if (timer_elapsed32(bat_indicator_cnt) > 2000) {
-            enable_bat_indicators = true;
-            bat_indicator_cnt     = timer_read32();
-        }
     }
 
 #endif
@@ -1673,7 +1673,7 @@ void hs_reset_settings(void) {
             dprintf("Slave sync failed!\n");
         }
     }
-    enable_bat_indicators = false;
+    bat_suppress_until = timer_read32() + WLS_BAT_SUPPRESS_MS;
     eeconfig_init();
     eeconfig_update_rgb_matrix_default();
 

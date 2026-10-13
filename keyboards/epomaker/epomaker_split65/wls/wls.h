@@ -23,6 +23,19 @@
 #define HS_LBACK_TIMEOUT (30 * 1000)
 #define HS_SLEEP_TIMEOUT (1 * 60000) //(1 * 60000)
 
+/* How often the board re-asserts the cable/charge state to the module and asks
+ * it for the volume. This is a *bounded poll*, not a transition effect: an
+ * external USB-C cable can be inserted or removed while the keyboard is idle,
+ * with no keycode or switch event to hang the update on, so the module must be
+ * told periodically. The cadence is the rule, so it is named here rather than
+ * left as a bare literal at the call site. */
+#define WLS_MODULE_POLL_MS 1000
+
+/* After an EEPROM reset the battery indicator is suppressed for this long, so
+ * the wipe's own RGB re-init does not read as a battery event. Expressed as a
+ * deadline (below), not as a flag re-derived every frame. */
+#define WLS_BAT_SUPPRESS_MS 2000
+
 enum modeio_mode { hs_none = 0, hs_usb, hs_bt, hs_2g4, hs_wireless };
 
 extern bool charging_state;
