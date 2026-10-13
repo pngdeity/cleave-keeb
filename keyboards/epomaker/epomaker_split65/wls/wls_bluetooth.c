@@ -140,6 +140,12 @@ void bluetooth_send_nkro(report_nkro_t *report) {
             for (uint8_t c = 0; c < key_count; c++) {
                 for (n = 0; n < NKRO_REPORT_BITS && !temp_report_nkro.bits[n]; n++) {
                 }
+                /* The set can empty before `c` reaches `key_count` (the bits
+                 * this report carried may not include the key in this 6KRO
+                 * slot). Stop rather than indexing `bits[NKRO_REPORT_BITS]`. */
+                if (n >= NKRO_REPORT_BITS) {
+                    break;
+                }
                 usageid = (n << 3) | biton(temp_report_nkro.bits[n]);
                 del_key_bit(&temp_report_nkro, usageid);
                 if (usageid == temp_report_keyboard.keys[i]) {
@@ -164,6 +170,12 @@ void bluetooth_send_nkro(report_nkro_t *report) {
             uint8_t idx, n = 0;
 
             for (n = 0; n < NKRO_REPORT_BITS && !temp_report_nkro.bits[n]; n++) {
+            }
+            /* `key_count` is the popcount, so exactly that many bits exist; this
+             * guard only protects the read when a caller passes a report whose
+             * count and bitmap disagree. Never index `bits[NKRO_REPORT_BITS]`. */
+            if (n >= NKRO_REPORT_BITS) {
+                break;
             }
             usageid = (n << 3) | biton(temp_report_nkro.bits[n]);
             del_key_bit(&temp_report_nkro, usageid);

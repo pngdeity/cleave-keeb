@@ -87,6 +87,12 @@ void wireless_send_nkro(report_nkro_t *report) {
 
             for (uint8_t c = 0; c < key_count; c++) {
                 for (n = 0; n < NKRO_REPORT_BITS && !temp_report_nkro.bits[n]; n++) {}
+                /* Guard the read: the set can empty before the count runs out, so
+                 * `n` may reach NKRO_REPORT_BITS; indexing `bits[n]` then is out
+                 * of bounds (found by the sanitizer, wiring review Phase C.7). */
+                if (n >= NKRO_REPORT_BITS) {
+                    break;
+                }
                 usageid = (n << 3) | biton(temp_report_nkro.bits[n]);
                 del_key_bit(&temp_report_nkro, usageid);
                 if (usageid == temp_report_keyboard.keys[i]) {
@@ -111,6 +117,10 @@ void wireless_send_nkro(report_nkro_t *report) {
             uint8_t idx, n = 0;
 
             for (n = 0; n < NKRO_REPORT_BITS && !temp_report_nkro.bits[n]; n++) {}
+            /* Same guard as above: never index `bits[NKRO_REPORT_BITS]`. */
+            if (n >= NKRO_REPORT_BITS) {
+                break;
+            }
             usageid = (n << 3) | biton(temp_report_nkro.bits[n]);
             del_key_bit(&temp_report_nkro, usageid);
 

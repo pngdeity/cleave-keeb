@@ -85,6 +85,9 @@ static void bt_collapse(const report_nkro_t *report, const report_keyboard_t *re
         for (uint8_t c = 0; c < key_count; c++) {
             for (n = 0; n < NKRO_REPORT_BITS && !temp_report_nkro.bits[n]; n++) {
             }
+            if (n >= NKRO_REPORT_BITS) {
+                break;
+            }
             usageid = (n << 3) | biton(temp_report_nkro.bits[n]);
             del_key_bit(&temp_report_nkro, usageid);
             if (usageid == temp_report_keyboard.keys[i]) {
@@ -152,6 +155,9 @@ static void vendor_collapse(const report_nkro_t *report, const report_keyboard_t
 
         for (uint8_t c = 0; c < key_count; c++) {
             for (n = 0; n < NKRO_REPORT_BITS && !temp_report_nkro.bits[n]; n++) {
+            }
+            if (n >= NKRO_REPORT_BITS) {
+                break;
             }
             usageid = (n << 3) | biton(temp_report_nkro.bits[n]);
             del_key_bit(&temp_report_nkro, usageid);

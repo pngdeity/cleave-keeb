@@ -135,8 +135,9 @@ void master_sync_mms_slave(uint8_t last_mode, uint8_t now_mode, uint8_t reset) {
     m2s.body[1]           = now_mode;
     m2s.body[2]           = reset;
     if (transaction_rpc_exec(USER_SYNC_MMS, sizeof(m2s), &m2s, sizeof(s2m), &s2m)) {
-        if (s2m.resp == 0x00)
+        if (s2m.resp == 0x00) {
             ;
+        }
         dprintf("Slave Sleep OK1\n");
     } else {
         dprintf("Slave sync failed1!\n");
@@ -413,6 +414,7 @@ void wireless_post_task(void) {
 }
 
 uint32_t wls_process_long_press(uint32_t trigger_time, void *cb_arg) {
+    (void)trigger_time;
     /* The deferred call carries the *resolved* target device, written once when
      * the timer was armed. It must not point at shared state: `defer_exec` stores
      * the pointer, so a pointer into a per-keypress variable would be rewritten
@@ -1252,6 +1254,7 @@ void rgb_matrix_hs_indicator_set(uint8_t index, RGB rgb, uint32_t interval, uint
 }
 
 void rgb_matrix_hs_set_remain_time(uint8_t index, uint8_t remain_time) {
+    (void)remain_time;
     for (int i = 0; i < HS_RGB_INDICATOR_COUNT; i++) {
         if (hs_rgb_indicators[i].index == index) {
             hs_rgb_indicators[i].times  = 0;
@@ -1301,6 +1304,9 @@ bool rgb_matrix_indicators_advanced_kb(uint8_t led_min, uint8_t led_max) {
     if (rgb_matrix_indicators_advanced_user(led_min, led_max) != true) {
         return false;
     }
+#else
+    (void)led_min;
+    (void)led_max;
 #endif
 
     if (ee_clr_timer && timer_elapsed32(ee_clr_timer) > 3000) {
@@ -1389,6 +1395,8 @@ void lpwr_wakeup_hook(void) {
 }
 
 void user_sync_mms_slave_handler(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {
+    (void)in_buflen;
+    (void)out_buflen;
     const master_to_slave_t *m2s = (const master_to_slave_t *)in_data;
     slave_to_master_t       *s2m = (slave_to_master_t *)out_data;
 

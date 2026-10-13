@@ -105,6 +105,8 @@ static void md_calc_check_sum(uint8_t *data, uint32_t length) {
 
 bool md_receive_process_user(uint8_t *pdata, uint8_t len) __attribute__((weak));
 bool md_receive_process_user(uint8_t *pdata, uint8_t len) {
+    (void)pdata;
+    (void)len;
     return true;
 }
 
@@ -114,10 +116,15 @@ bool md_receive_process_kb(uint8_t *pdata, uint8_t len) {
 }
 
 void md_receive_raw_cb(uint8_t *pdata, uint8_t len) __attribute__((weak));
-void md_receive_raw_cb(uint8_t *pdata, uint8_t len) {}
+void md_receive_raw_cb(uint8_t *pdata, uint8_t len) {
+    (void)pdata;
+    (void)len;
+}
 
 void md_receive_host_cb(bool resume) __attribute__((weak));
-void md_receive_host_cb(bool resume) {}
+void md_receive_host_cb(bool resume) {
+    (void)resume;
+}
 
 static void md_receive_msg_task(void) {
     /* The framing is a pure state machine (`md_frame_feed`, md_frame.c); this
@@ -249,7 +256,8 @@ static void md_send_pkt_task(void) {
         case smsg_state_replied: {
             smsg_pop();
             smsg_set_state(smsg_state_free);
-        } // break;
+        }
+        /* fall through */
         case smsg_state_free: {
             uint32_t size = smsg_peek(md_pkt_payload);
             if (size) {
