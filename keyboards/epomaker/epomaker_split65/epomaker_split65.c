@@ -67,21 +67,19 @@ void rgb_matrix_hs_set_remain_time(uint8_t index, uint8_t remain_time);
 #define keymap_is_mac_system() ((get_highest_layer(default_layer_state) == _MBL) || (get_highest_layer(default_layer_state) == _MFL))
 #define keymap_is_base_layer() ((get_highest_layer(default_layer_state) == _BL) || (get_highest_layer(default_layer_state) == _FL))
 
-uint32_t post_init_timer = 0x00;
-bool     mac_status      = false;
-bool     charging_state  = false;
-bool     bat_full_flag   = false;
+static uint32_t post_init_timer = 0x00;
+bool            charging_state  = false;
+bool            bat_full_flag   = false;
 /* The battery indicator's suppression deadline (0 = not suppressed). Set to
  * "now + WLS_BAT_SUPPRESS_MS" by an EEPROM reset; the indicator is hidden while
  * `timer_read32() < bat_suppress_until`. One deadline read as a comparison by
  * the shell, instead of a bool plus a parallel timer kept in lockstep and
  * re-derived every frame. */
-static uint32_t bat_suppress_until = 0;
-static uint32_t ee_clr_timer       = 0;
-bool            no_record_fg;
-uint8_t         pov;
-static bool     im_bat_req_charging_flag = false;
-uint8_t         buff[]                   = {14, 8, 2, 1, 1, 1, 1, 1, 1, 1, 0};
+static uint32_t      bat_suppress_until = 0;
+static uint32_t      ee_clr_timer       = 0;
+static bool          no_record_fg;
+static bool          im_bat_req_charging_flag = false;
+static const uint8_t buff[]                   = {14, 8, 2, 1, 1, 1, 1, 1, 1, 1, 0};
 
 void usart_init(void) {
     // palSetLineMode(SERIAL_USART_TX_PIN, PAL_MODE_ALTERNATE(SERIAL_USART_TX_PAL_MODE) | PAL_OUTPUT_TYPE_OPENDRAIN);
@@ -229,7 +227,6 @@ void keyboard_post_init_kb(void) {
 
     rgbrec_init(confinfo.record_channel);
 
-    pov = *md_getp_bat();
     // usart_init();
     transaction_register_rpc(USER_SYNC_MMS, user_sync_mms_slave_handler);
 }
@@ -620,9 +617,7 @@ void im_rgblight_increase(void) {
     }
 }
 
-uint32_t hs_ct_time;
-RGB      rgb_test_open;
-bool     process_record_kb(uint16_t keycode, keyrecord_t *record) {
+bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
     if (process_record_user(keycode, record) != true) {
         return false;
     }
@@ -1256,8 +1251,7 @@ void housekeeping_task_user(void) { // loop
         static uint32_t last_sync = 0;
         if (timer_elapsed32(last_sync) > 2000) {
             last_sync = timer_read32();
-            pov       = *md_getp_bat();
-            master_sync_mms_slave(wireless_get_current_devs(), wireless_get_current_devs(), pov);
+            master_sync_mms_slave(wireless_get_current_devs(), wireless_get_current_devs(), *md_getp_bat());
         }
     }
 }
@@ -1265,19 +1259,25 @@ void housekeeping_task_user(void) { // loop
 #ifdef RGB_MATRIX_ENABLE
 
 #    ifdef WIRELESS_ENABLE
-uint32_t wls_rgb_indicator_timer    = 0x00;
-uint32_t wls_rgb_indicator_interval = 0;
-uint32_t wls_rgb_indicator_times    = 0;
-uint32_t wls_rgb_indicator_index    = 0;
-RGB      wls_rgb_indicator_rgb      = {0};
+/* The channel-indicator flash, as one piece of state. The five fields are
+ * written together by `rgb_matrix_wls_indicator_set()` and consumed together by
+ * `rgb_matrix_wls_indicator()`; bundling them gives that state a name and the
+ * smallest honest scope, instead of five loose file-scope globals that any
+ * function could reach (Power of Ten Rule 6, wiring review Phase C.5). */
+static struct {
+    uint32_t timer;    /* when the current interval began (0 = idle) */
+    uint32_t interval; /* flash half-period, ms */
+    uint32_t times;    /* remaining half-flashes (0 = done) */
+    uint8_t  index;    /* LED to flash */
+    RGB      rgb;      /* colour to flash */
+} wls_indicator;
 
 void rgb_matrix_wls_indicator_set(uint8_t index, RGB rgb, uint32_t interval, uint8_t times) {
-    wls_rgb_indicator_timer = timer_read32();
-
-    wls_rgb_indicator_index    = index;
-    wls_rgb_indicator_interval = interval;
-    wls_rgb_indicator_times    = times * 2;
-    wls_rgb_indicator_rgb      = rgb;
+    wls_indicator.timer    = timer_read32();
+    wls_indicator.index    = index;
+    wls_indicator.interval = interval;
+    wls_indicator.times    = times * 2;
+    wls_indicator.rgb      = rgb;
 }
 
 /* The user's explicit transport intent is the only thing that may touch the
@@ -1396,26 +1396,26 @@ bool rgb_matrix_wls_indicator_cb(void) {
 }
 
 void rgb_matrix_wls_indicator(void) {
-    if (wls_rgb_indicator_timer) {
-        if (timer_elapsed32(wls_rgb_indicator_timer) >= wls_rgb_indicator_interval) {
-            wls_rgb_indicator_timer = timer_read32();
+    if (wls_indicator.timer) {
+        if (timer_elapsed32(wls_indicator.timer) >= wls_indicator.interval) {
+            wls_indicator.timer = timer_read32();
 
-            if (wls_rgb_indicator_times) {
-                wls_rgb_indicator_times--;
+            if (wls_indicator.times) {
+                wls_indicator.times--;
             }
 
-            if (wls_rgb_indicator_times <= 0) {
-                wls_rgb_indicator_timer = 0x00;
+            if (wls_indicator.times <= 0) {
+                wls_indicator.timer = 0x00;
                 if (rgb_matrix_wls_indicator_cb() != true) {
                     return;
                 }
             }
         }
 
-        if (wls_rgb_indicator_times % 2) {
-            rgb_matrix_set_color(wls_rgb_indicator_index, wls_rgb_indicator_rgb.r, wls_rgb_indicator_rgb.g, wls_rgb_indicator_rgb.b);
+        if (wls_indicator.times % 2) {
+            rgb_matrix_set_color(wls_indicator.index, wls_indicator.rgb.r, wls_indicator.rgb.g, wls_indicator.rgb.b);
         } else {
-            rgb_matrix_set_color(wls_rgb_indicator_index, 0x00, 0x00, 0x00);
+            rgb_matrix_set_color(wls_indicator.index, 0x00, 0x00, 0x00);
         }
     }
 }
