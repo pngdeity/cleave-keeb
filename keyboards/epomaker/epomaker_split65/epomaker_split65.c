@@ -8,6 +8,7 @@
 #include "wls/wls_eeprom.h"
 #include "wls/wls_usb.h"
 #include "wls/split_logic.h"
+#include "wls/indicator_logic.h"
 #include "rgb_record/rgb_record.h"
 #include "quantum.h"
 #include "connection.h"
@@ -21,12 +22,10 @@
 #endif
 
 typedef struct {
-    bool     active;
-    uint32_t timer;
-    uint32_t interval;
-    uint32_t times;
-    uint8_t  index;
-    RGB      rgb;
+    bool        active;
+    wls_blink_t blink; /* the shared blink timing (wls/indicator_logic) */
+    uint8_t     index;
+    RGB         rgb;
     void (*blink_cb)(uint8_t);
 } hs_rgb_indicator_t;
 
@@ -833,25 +832,21 @@ void housekeeping_task_user(void) { // loop
 #ifdef RGB_MATRIX_ENABLE
 
 #    ifdef WIRELESS_ENABLE
-/* The channel-indicator flash, as one piece of state. The five fields are
- * written together by `rgb_matrix_wls_indicator_set()` and consumed together by
- * `rgb_matrix_wls_indicator()`; bundling them gives that state a name and the
- * smallest honest scope, instead of five loose file-scope globals that any
- * function could reach (Power of Ten Rule 6, wiring review Phase C.5). */
+/* The channel-indicator flash, as one piece of state. The blink timing is the
+ * shared `wls_blink_t` (wls/indicator_logic); the index and colour are this
+ * concern's own. Bundling them keeps the state's scope honest instead of five
+ * loose file-scope globals that any function could reach (Power of Ten Rule 6,
+ * wiring review Phase C.5). */
 static struct {
-    uint32_t timer;    /* when the current interval began (0 = idle) */
-    uint32_t interval; /* flash half-period, ms */
-    uint32_t times;    /* remaining half-flashes (0 = done) */
-    uint8_t  index;    /* LED to flash */
-    RGB      rgb;      /* colour to flash */
+    wls_blink_t blink; /* the shared blink timing; interval_ms 0 = idle */
+    uint8_t     index; /* LED to flash */
+    RGB         rgb;   /* colour to flash */
 } wls_indicator;
 
 void rgb_matrix_wls_indicator_set(uint8_t index, RGB rgb, uint32_t interval, uint8_t times) {
-    wls_indicator.timer    = timer_read32();
-    wls_indicator.index    = index;
-    wls_indicator.interval = interval;
-    wls_indicator.times    = times * 2;
-    wls_indicator.rgb      = rgb;
+    wls_blink_arm(&wls_indicator.blink, interval, times, timer_read32());
+    wls_indicator.index = index;
+    wls_indicator.rgb   = rgb;
 }
 
 /* The user's explicit transport intent is the only thing that may touch the
@@ -970,39 +965,37 @@ bool rgb_matrix_wls_indicator_cb(void) {
 }
 
 void rgb_matrix_wls_indicator(void) {
-    if (wls_indicator.timer) {
-        if (timer_elapsed32(wls_indicator.timer) >= wls_indicator.interval) {
-            wls_indicator.timer = timer_read32();
+    /* Idle: the flash owns nothing, so it paints nothing (the LED is left as
+     * some other writer set it). */
+    if (wls_indicator.blink.interval_ms == 0) {
+        return;
+    }
 
-            if (wls_indicator.times) {
-                wls_indicator.times--;
-            }
+    wls_blink_out_t out = wls_blink_tick(&wls_indicator.blink, timer_read32());
 
-            if (wls_indicator.times <= 0) {
-                wls_indicator.timer = 0x00;
-                if (rgb_matrix_wls_indicator_cb() != true) {
-                    return;
-                }
-            }
+    if (out.kind == WLS_BLINK_DONE) {
+        /* The flash is owed to a transition and is armed exactly once, at the
+         * transition site; on completion it is done (the terminal predicate
+         * decides whether the LED stays lit). */
+        if (rgb_matrix_wls_indicator_cb() != true) {
+            return;
         }
+    }
 
-        if (wls_indicator.times % 2) {
-            rgb_matrix_set_color(wls_indicator.index, wls_indicator.rgb.r, wls_indicator.rgb.g, wls_indicator.rgb.b);
-        } else {
-            rgb_matrix_set_color(wls_indicator.index, 0x00, 0x00, 0x00);
-        }
+    if (out.on) {
+        rgb_matrix_set_color(wls_indicator.index, wls_indicator.rgb.r, wls_indicator.rgb.g, wls_indicator.rgb.b);
+    } else {
+        rgb_matrix_set_color(wls_indicator.index, 0x00, 0x00, 0x00);
     }
 }
 
 void rgb_matrix_hs_bat_set(uint8_t index, RGB rgb, uint32_t interval, uint8_t times) {
     for (int i = 0; i < HS_RGB_BAT_COUNT; i++) {
         if (!hs_rgb_bat[i].active) {
-            hs_rgb_bat[i].active   = true;
-            hs_rgb_bat[i].timer    = timer_read32();
-            hs_rgb_bat[i].interval = interval;
-            hs_rgb_bat[i].times    = times * 2;
-            hs_rgb_bat[i].index    = index;
-            hs_rgb_bat[i].rgb      = rgb;
+            hs_rgb_bat[i].active = true;
+            wls_blink_arm(&hs_rgb_bat[i].blink, interval, times, timer_read32());
+            hs_rgb_bat[i].index = index;
+            hs_rgb_bat[i].rgb   = rgb;
             break;
         }
     }
@@ -1010,25 +1003,20 @@ void rgb_matrix_hs_bat_set(uint8_t index, RGB rgb, uint32_t interval, uint8_t ti
 
 void rgb_matrix_hs_bat(void) {
     for (int i = 0; i < HS_RGB_BAT_COUNT; i++) {
-        if (hs_rgb_bat[i].active) {
-            if (timer_elapsed32(hs_rgb_bat[i].timer) >= hs_rgb_bat[i].interval) {
-                hs_rgb_bat[i].timer = timer_read32();
+        if (!hs_rgb_bat[i].active) {
+            continue;
+        }
 
-                if (hs_rgb_bat[i].times) {
-                    hs_rgb_bat[i].times--;
-                }
+        wls_blink_out_t out = wls_blink_tick(&hs_rgb_bat[i].blink, timer_read32());
 
-                if (hs_rgb_bat[i].times <= 0) {
-                    hs_rgb_bat[i].active = false;
-                    hs_rgb_bat[i].timer  = 0x00;
-                }
-            }
+        if (out.kind == WLS_BLINK_DONE) {
+            hs_rgb_bat[i].active = false;
+        }
 
-            if (hs_rgb_bat[i].times % 2) {
-                rgb_matrix_set_color(hs_rgb_bat[i].index, hs_rgb_bat[i].rgb.r, hs_rgb_bat[i].rgb.g, hs_rgb_bat[i].rgb.b);
-            } else {
-                rgb_matrix_set_color(hs_rgb_bat[i].index, 0x00, 0x00, 0x00);
-            }
+        if (out.on) {
+            rgb_matrix_set_color(hs_rgb_bat[i].index, hs_rgb_bat[i].rgb.r, hs_rgb_bat[i].rgb.g, hs_rgb_bat[i].rgb.b);
+        } else {
+            rgb_matrix_set_color(hs_rgb_bat[i].index, 0x00, 0x00, 0x00);
         }
     }
 }
@@ -1045,31 +1033,25 @@ void bat_indicators(void) {
      * full channel intensity so the charge state is legible at a glance rather
      * than a single dim LED. */
     if (rgb_matrix_get_val() != 0) {
-        uint8_t r, g, b;
-        if (charging_state && (bat_full_flag)) {
-            r = 0x00;
-            g = 0xFF;
-            b = 0x00;
-        } else if (charging_state) {
-            r = 0x00;
-            g = 0x40;
-            b = 0xFF;
-        } else if (bat_level >= 50) {
-            r = 0x00;
-            g = 0xFF;
-            b = 0x00;
-        } else if (bat_level >= 30) {
-            r = 0xFF;
-            g = 0x80;
-            b = 0x00;
-        } else if (bat_level > BATTERY_CAPACITY_LOW) {
-            r = 0xFF;
-            g = 0x00;
-            b = 0x00;
-        } else {
-            r = 0xFF;
-            g = 0x00;
-            b = 0x00;
+        uint8_t r = 0x00, g = 0x00, b = 0x00;
+        switch (wls_bat_colour_of(charging_state, bat_full_flag, bat_level)) {
+            case WLS_BAT_GREEN:
+                g = 0xFF;
+                break;
+            case WLS_BAT_BLUE:
+                g = 0x40;
+                b = 0xFF;
+                break;
+            case WLS_BAT_ORANGE:
+                r = 0xFF;
+                g = 0x80;
+                break;
+            case WLS_BAT_RED:
+                r = 0xFF;
+                break;
+            case WLS_BAT_NONE:
+            default:
+                break;
         }
         rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX, r, g, b);
         rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX2, r, g, b);
@@ -1131,17 +1113,11 @@ void nkr_indicators_hook(uint8_t index) {
 void rgb_matrix_hs_indicator_set(uint8_t index, RGB rgb, uint32_t interval, uint8_t times) {
     for (int i = 0; i < HS_RGB_INDICATOR_COUNT; i++) {
         if (!hs_rgb_indicators[i].active) {
-            hs_rgb_indicators[i].active   = true;
-            hs_rgb_indicators[i].timer    = timer_read32();
-            hs_rgb_indicators[i].interval = interval;
-            hs_rgb_indicators[i].times    = times * 2;
+            hs_rgb_indicators[i].active = true;
+            wls_blink_arm(&hs_rgb_indicators[i].blink, interval, times, timer_read32());
             hs_rgb_indicators[i].index    = index;
             hs_rgb_indicators[i].rgb      = rgb;
-            if (index != 0xFF)
-                hs_rgb_indicators[i].blink_cb = NULL;
-            else {
-                hs_rgb_indicators[i].blink_cb = nkr_indicators_hook;
-            }
+            hs_rgb_indicators[i].blink_cb = (index != 0xFF) ? NULL : nkr_indicators_hook;
             break;
         }
     }
@@ -1151,8 +1127,9 @@ void rgb_matrix_hs_set_remain_time(uint8_t index, uint8_t remain_time) {
     (void)remain_time;
     for (int i = 0; i < HS_RGB_INDICATOR_COUNT; i++) {
         if (hs_rgb_indicators[i].index == index) {
-            hs_rgb_indicators[i].times  = 0;
-            hs_rgb_indicators[i].active = false;
+            hs_rgb_indicators[i].blink.remaining   = 0;
+            hs_rgb_indicators[i].blink.interval_ms = 0;
+            hs_rgb_indicators[i].active            = false;
             break;
         }
     }
@@ -1160,35 +1137,27 @@ void rgb_matrix_hs_set_remain_time(uint8_t index, uint8_t remain_time) {
 
 void rgb_matrix_hs_indicator(void) {
     for (int i = 0; i < HS_RGB_INDICATOR_COUNT; i++) {
-        if (hs_rgb_indicators[i].active) {
-            if (timer_elapsed32(hs_rgb_indicators[i].timer) >= hs_rgb_indicators[i].interval) {
-                hs_rgb_indicators[i].timer = timer_read32();
+        if (!hs_rgb_indicators[i].active) {
+            continue;
+        }
 
-                if (hs_rgb_indicators[i].times) {
-                    hs_rgb_indicators[i].times--;
-                }
+        wls_blink_out_t out = wls_blink_tick(&hs_rgb_indicators[i].blink, timer_read32());
 
-                if (hs_rgb_indicators[i].times <= 0) {
-                    hs_rgb_indicators[i].active = false;
-                    hs_rgb_indicators[i].timer  = 0x00;
-                    if (hs_rgb_indicators[i].blink_cb != NULL) hs_rgb_indicators[i].blink_cb(i);
-                    continue;
-                }
+        if (out.kind == WLS_BLINK_DONE) {
+            hs_rgb_indicators[i].active = false;
+            if (hs_rgb_indicators[i].blink_cb != NULL) {
+                hs_rgb_indicators[i].blink_cb(i);
             }
+            continue;
+        }
 
-            if ((hs_rgb_indicators[i].times % 2)) {
-                if (hs_rgb_indicators[i].index == 0xFF) {
-                    rgb_matrix_set_color_all(hs_rgb_indicators[i].rgb.r, hs_rgb_indicators[i].rgb.g, hs_rgb_indicators[i].rgb.b);
-                } else {
-                    rgb_matrix_set_color(hs_rgb_indicators[i].index, hs_rgb_indicators[i].rgb.r, hs_rgb_indicators[i].rgb.g, hs_rgb_indicators[i].rgb.b);
-                }
-            } else {
-                if (hs_rgb_indicators[i].index == 0xFF) {
-                    rgb_matrix_set_color_all(0x00, 0x00, 0x00);
-                } else {
-                    rgb_matrix_set_color(hs_rgb_indicators[i].index, 0x00, 0x00, 0x00);
-                }
-            }
+        uint8_t r = out.on ? hs_rgb_indicators[i].rgb.r : 0x00;
+        uint8_t g = out.on ? hs_rgb_indicators[i].rgb.g : 0x00;
+        uint8_t b = out.on ? hs_rgb_indicators[i].rgb.b : 0x00;
+        if (hs_rgb_indicators[i].index == 0xFF) {
+            rgb_matrix_set_color_all(r, g, b);
+        } else {
+            rgb_matrix_set_color(hs_rgb_indicators[i].index, r, g, b);
         }
     }
 }
