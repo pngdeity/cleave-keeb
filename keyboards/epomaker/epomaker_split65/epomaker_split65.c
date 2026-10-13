@@ -8,6 +8,8 @@
 #include "wls/wls_eeprom.h"
 #include "wls/wls_usb.h"
 #include "wls/split_logic.h"
+#include "wls/wls_split.h"
+#include "wls/wls_lifecycle.h"
 #include "wls/indicator_logic.h"
 #include "rgb_record/rgb_record.h"
 #include "quantum.h"
@@ -49,44 +51,17 @@ void rgb_matrix_hs_set_remain_time(uint8_t index, uint8_t remain_time);
 #define keymap_is_mac_system() ((get_highest_layer(default_layer_state) == _MBL) || (get_highest_layer(default_layer_state) == _MFL))
 #define keymap_is_base_layer() ((get_highest_layer(default_layer_state) == _BL) || (get_highest_layer(default_layer_state) == _FL))
 
-static uint32_t post_init_timer = 0x00;
-bool            charging_state  = false;
-bool            bat_full_flag   = false;
 /* The battery indicator's suppression deadline (0 = not suppressed). Set to
  * "now + WLS_BAT_SUPPRESS_MS" by an EEPROM reset; the indicator is hidden while
  * `timer_read32() < bat_suppress_until`. One deadline read as a comparison by
  * the shell, instead of a bool plus a parallel timer kept in lockstep and
  * re-derived every frame. */
-static uint32_t      bat_suppress_until = 0;
-static uint32_t      ee_clr_timer       = 0;
-static bool          no_record_fg;
-static bool          im_bat_req_charging_flag = false;
-static const uint8_t buff[]                   = {14, 8, 2, 1, 1, 1, 1, 1, 1, 1, 0};
+static uint32_t bat_suppress_until = 0;
+static uint32_t ee_clr_timer       = 0;
+static bool     no_record_fg;
+static bool     im_bat_req_charging_flag = false;
 
-typedef struct _master_to_slave_t {
-    uint8_t cmd;
-    uint8_t body[4];
-} master_to_slave_t;
-
-typedef struct _slave_to_master_t {
-    uint8_t resp;
-    uint8_t body[4];
-} slave_to_master_t;
-
-/* The one way the master sends a command over the split link. Every master-side
- * sender used to open-code `transaction_rpc_exec(USER_SYNC_MMS, ...)`; routing
- * them through one primitive keeps the wire call (and its `master_to_slave_t`
- * shape) stated once. The policy -- which command, when -- stays at the call
- * site, where it belongs. */
-static bool wls_split_send(uint8_t cmd, const uint8_t body[4]) {
-    master_to_slave_t m2s = {0};
-    slave_to_master_t s2m = {0};
-    m2s.cmd               = cmd;
-    if (body != NULL) {
-        memcpy(m2s.body, body, sizeof(m2s.body));
-    }
-    return transaction_rpc_exec(USER_SYNC_MMS, sizeof(m2s), &m2s, sizeof(s2m), &s2m);
-}
+static const uint8_t buff[] = {14, 8, 2, 1, 1, 1, 1, 1, 1, 1, 0};
 
 void master_sync_mms_slave(uint8_t last_mode, uint8_t now_mode, uint8_t reset) {
     const uint8_t body[4] = {last_mode, now_mode, reset, 0};
@@ -110,69 +85,7 @@ void keyboard_post_init_kb(void) {
     rgblight_mode(buff[0]);
 #endif
 
-#ifdef LED_POWER_EN_PIN
-    gpio_set_pin_output(LED_POWER_EN_PIN);
-#endif
-
-#ifdef LED_POWER_EN2_PIN
-    gpio_set_pin_output(LED_POWER_EN2_PIN);
-#endif
-
-    /* Rail starts from its single owner (defect 5). */
-    wls_led_rail_apply();
-
-#ifdef HS_BT_DEF_PIN
-    gpio_set_pin_input_high(HS_BT_DEF_PIN);
-#endif
-
-#ifdef HS_2G4_DEF_PIN
-    gpio_set_pin_input_high(HS_2G4_DEF_PIN);
-#endif
-
-#ifdef USB_POWER_EN_PIN
-    gpio_write_pin_low(USB_POWER_EN_PIN);
-    gpio_set_pin_output(USB_POWER_EN_PIN);
-#endif
-
-#ifdef HS_BAT_CABLE_PIN
-    gpio_set_pin_input(HS_BAT_CABLE_PIN);
-#endif
-
-#ifdef BAT_FULL_PIN
-    gpio_set_pin_input_high(BAT_FULL_PIN);
-#endif
-
-#ifdef WIRELESS_ENABLE
-    wireless_init();
-#    if (!(defined(HS_BT_DEF_PIN) && defined(HS_2G4_DEF_PIN)))
-    wireless_devs_change(!confinfo.devs, confinfo.devs, false);
-#    endif
-
-    /* Apply the physical switch LEVEL to the connection host here, in post-init
-     * — after upstream's `connection_init()` has read EEPROM but before the
-     * first `keyboard_task()`/`host_task()` in the main loop. Without this the
-     * first `host_task()` resolves `config.desired_host` from stale EEPROM
-     * before the switch is read, and (with the vendor `set_transport()` swap
-     * gone, item 14d) the board would route a report through a driver whose
-     * module is not initialized. This is the same switch-authority seed as the
-     * 100 ms pass in `wireless_post_task()`, moved earlier so no report can
-     * precede it; that pass remains for boards/branches we do not reach here. */
-#    if defined(HS_BT_DEF_PIN) && defined(HS_2G4_DEF_PIN)
-    {
-        /* Seed the transport from the switch before any report can be sent: the
-         * shared applier sets BOTH selectors (host + device index) from one
-         * switch read, so no report can precede the switch's authority. */
-        uint8_t last_bt = (confinfo.devs >= DEVS_BT1 && confinfo.devs <= DEVS_BT5) ? confinfo.devs : confinfo.last_btdevs;
-        /* Drive the USB data line from the host we *applied*, not from a re-read
-         * of `connection_get_host()`: `connection_set_host_noeeprom` early-returns
-         * when EEPROM already holds that host, so a re-read can be stale and drop
-         * the line. One read, one decision, applied consistently. */
-        connection_host_t applied = apply_switch_transport(hs_mode_switch_pos(), last_bt);
-        wls_usb_connect(applied == CONNECTION_HOST_USB);
-    }
-#    endif
-    post_init_timer = timer_read32();
-#endif
+    wls_lifecycle_boot();
 
     keyboard_post_init_user();
 
@@ -185,124 +98,35 @@ void keyboard_post_init_kb(void) {
 #ifdef WIRELESS_ENABLE
 
 void suspend_power_down_kb(void) {
-#    ifdef LED_POWER_EN_PIN
-    gpio_write_pin_low(LED_POWER_EN_PIN);
-#    endif
-
-#    ifdef LED_POWER_EN2_PIN
-    gpio_write_pin_low(LED_POWER_EN2_PIN);
-#    endif
+    wls_lifecycle_suspend_power_down_kb();
 
     suspend_power_down_user();
 }
 
 void suspend_wakeup_init_kb(void) {
-    /* Rail from its single owner (defect 5). */
-    wls_led_rail_apply();
-
-    wireless_devs_change(wireless_get_current_devs(), wireless_get_current_devs(), false);
+    wls_lifecycle_suspend_wakeup_init_kb();
     suspend_wakeup_init_user();
     hs_link_activity();
 }
 
 void suspend_wakeup_init_user(void) {
-    usart_init();
-
-    /* The 0xCC/0xBB pair relay LED-rail power to the slave, so they only make
-     * sense on battery. While cabled the rail must stay up on both halves;
-     * broadcasting it would extinguish the slave's backlight. */
-    if (wireless_get_current_devs() == DEVS_USB) {
-        return;
-    }
-
-    if (wls_split_send(WLS_SPLIT_CMD_WAKEUP, NULL)) {
-        dprintf("Slave Sleep OK\n");
-    } else {
-        dprint("Slave sync failed!\n");
-    }
+    wls_lifecycle_suspend_wakeup_init_user();
 }
 
 void suspend_power_down_user(void) {
-    if (wireless_get_current_devs() == DEVS_USB) {
-        return;
-    }
-
-    if (wls_split_send(WLS_SPLIT_CMD_POWER_DOWN, NULL)) {
-        dprintf("Slave Sleep OK\n");
-    } else {
-        dprint("Slave sync failed!\n");
-    }
+    wls_lifecycle_suspend_power_down_user();
 }
 
 bool lpwr_is_allow_timeout_hook(void) {
-    /* A half may only fall into the timeout path when it is the master and is
-     * not on USB. Whether the resulting stop is one this board may take is
-     * decided once, at the point of commitment: the sleep-policy contract
-     * (`lpwr_stop_is_allowed()`, enforced in the shared lowpower.c) refuses an
-     * unordered stop there, so the rule lives in one place rather than at each
-     * entry. */
-    if (!is_keyboard_master()) {
-        return false;
-    }
-
-    if (wireless_get_current_devs() == DEVS_USB) {
-        return false;
-    }
-
-    return true;
+    return wls_lifecycle_lpwr_allow_timeout();
 }
 
 bool lpwr_is_allow_presleep_hook(void) {
-    extern bool charging_state;
-
-    if (is_keyboard_master()) {
-        const uint8_t body[4] = {wls_sleep_ordered(), 0, 0, 0};
-        if (wls_split_send(WLS_SPLIT_CMD_SLEEP, body)) {
-            dprintf("Slave Sleep OK\n");
-        } else {
-            dprint("Slave sync failed!\n");
-        }
-
-        if (wireless_get_current_devs() != DEVS_USB) {
-            palSetLineMode(SERIAL_USART_RX_PIN, PAL_OUTPUT_TYPE_OPENDRAIN);
-            palSetLineMode(SERIAL_USART_TX_PIN, PAL_OUTPUT_TYPE_OPENDRAIN);
-        }
-    }
-
-    if ((wireless_get_current_devs() == DEVS_USB) && (!charging_state)) {
-        if (USB_DRIVER.state != USB_STOP) {
-            usb_power_disconnect();
-            usbDisconnectBus(&USBD1);
-            usbStop(&USBD1);
-        }
-    }
-    return true;
+    return wls_lifecycle_lpwr_allow_presleep();
 }
 
 void wireless_post_task(void) {
-    // auto switching devs
-    if (post_init_timer && timer_elapsed32(post_init_timer) >= 100) {
-        md_send_devctrl(MD_SND_CMD_DEVCTRL_FW_VERSION);   // get the module fw version.
-        md_send_devctrl(MD_SND_CMD_DEVCTRL_SLEEP_BT_EN);  // timeout 30min to sleep in bt mode, enable
-        md_send_devctrl(MD_SND_CMD_DEVCTRL_SLEEP_2G4_EN); // timeout 30min to sleep in 2.4g mode, enable
-        /* The physical switch is authoritative at boot. Restoring the persisted
-         * index blindly let a stale wireless selection survive a reboot with the
-         * switch on USB — the board came up on a dead wireless link while USB
-         * stayed enumerated ("enumerated but no keys"; defect 4). The shared
-         * applier derives BOTH selectors (the vendor device index *and*
-         * upstream's `config.desired_host`, which resolves
-         * `host_get_active_driver()`) from the switch LEVEL, so they can never
-         * disagree and route HID through the wrong driver (split brain). It is a
-         * switch-driven change, so it does not persist (14c). Persistence still
-         * supplies the BT1..5 sub-selection the switch cannot express. */
-        uint8_t last_bt = (confinfo.devs >= DEVS_BT1 && confinfo.devs <= DEVS_BT5) ? confinfo.devs : confinfo.last_btdevs;
-        apply_switch_transport(hs_mode_switch_pos(), last_bt);
-        post_init_timer = 0x00;
-    }
-#    if defined(HS_BT_DEF_PIN) && defined(HS_2G4_DEF_PIN)
-    hs_mode_scan(false, hsm_mode_seed(wireless_get_current_devs()), hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
-#    endif
-
+    wls_lifecycle_wireless_post_task();
     kb_battery_push_task();
 }
 
@@ -795,31 +619,9 @@ bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
  */
 
 void housekeeping_task_user(void) { // loop
-    uint8_t         hs_now_mode;
-    static uint32_t hs_current_time;
+    wls_lifecycle_housekeeping();
 
-    charging_state = gpio_read_pin(HS_BAT_CABLE_PIN);
-
-    bat_full_flag = gpio_read_pin(BAT_FULL_PIN);
-
-    /* Single owner for the LED rail: re-derive A5/A8 from the current RGB value
-     * on every half. See `wls_led_rail_apply()`. */
-    wls_led_rail_apply();
-
-    if (charging_state && (bat_full_flag)) {
-        hs_now_mode = MD_SND_CMD_DEVCTRL_CHARGING_DONE;
-    } else if (charging_state) {
-        hs_now_mode = MD_SND_CMD_DEVCTRL_CHARGING;
-    } else {
-        hs_now_mode = MD_SND_CMD_DEVCTRL_CHARGING_STOP;
-    }
-
-    if (!hs_current_time || timer_elapsed32(hs_current_time) > WLS_MODULE_POLL_MS) {
-        hs_current_time = timer_read32();
-        md_send_devctrl(hs_now_mode);
-        md_send_devctrl(MD_SND_CMD_DEVCTRL_INQVOL);
-    }
-
+#ifdef WIRELESS_ENABLE
     if (is_keyboard_master()) {
         static uint32_t last_sync = 0;
         if (timer_elapsed32(last_sync) > 2000) {
@@ -827,6 +629,7 @@ void housekeeping_task_user(void) { // loop
             master_sync_mms_slave(wireless_get_current_devs(), wireless_get_current_devs(), *md_getp_bat());
         }
     }
+#endif
 }
 
 #ifdef RGB_MATRIX_ENABLE
@@ -1246,10 +1049,7 @@ void hs_reset_settings(void) {
 }
 
 void lpwr_wakeup_hook(void) {
-    hs_mode_scan(false, hsm_mode_seed(wireless_get_current_devs()), hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
-
-    /* Rail from its single owner (defect 5). */
-    wls_led_rail_apply();
+    wls_lifecycle_lpwr_wakeup();
 }
 
 void user_sync_mms_slave_handler(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data) {

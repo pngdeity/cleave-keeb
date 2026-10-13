@@ -10,3 +10,5 @@ SRC += wls/split_logic.c
 SRC += wls/indicator_logic.c
 SRC += wls/wls_eeprom.c
 SRC += wls/wls_usb.c
+SRC += wls/wls_split.c
+SRC += wls/wls_lifecycle.c
