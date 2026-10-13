@@ -7,3 +7,4 @@ SRC += wls/transport_logic.c
 SRC += wls/keymap_logic.c
 SRC += wls/diag_logic.c
 SRC += wls/wls_eeprom.c
+SRC += wls/wls_usb.c

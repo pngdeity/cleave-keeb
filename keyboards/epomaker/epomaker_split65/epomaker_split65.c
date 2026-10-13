@@ -6,6 +6,7 @@
 #include "wls/transport_logic.h"
 #include "wls/keymap_logic.h"
 #include "wls/wls_eeprom.h"
+#include "wls/wls_usb.h"
 #include "rgb_record/rgb_record.h"
 #include "quantum.h"
 #include "connection.h"
@@ -175,47 +176,6 @@ void keyboard_post_init_kb(void) {
 }
 
 #ifdef WIRELESS_ENABLE
-
-void usb_power_connect(void) {
-#    ifdef USB_POWER_EN_PIN
-    gpio_write_pin_low(USB_POWER_EN_PIN);
-#    endif
-}
-
-void usb_power_disconnect(void) {
-#    ifdef USB_POWER_EN_PIN
-    gpio_write_pin_high(USB_POWER_EN_PIN);
-#    endif
-}
-
-/* The USB data-line connect/disconnect primitive. Formerly the vendor
- * `set_transport()` drove this by swapping `host_driver_t`; with that swap gone
- * (item 14d) the board owns it directly. The driver choice is upstream's
- * now — `host_get_active_driver()` — so nothing here touches a driver pointer.
- *
- * `last_suspend_state` is re-asserted on connect because the flag is not
- * reliably set after a bus restart. */
-void wls_usb_connect(bool enable) {
-    extern bool last_suspend_state;
-
-    if (enable) {
-        if (!usb_connected_state()) {
-            last_suspend_state = true;
-#    if !defined(KEEP_USB_CONNECTION_IN_WIRELESS_MODE)
-            usb_power_connect();
-            restart_usb_driver(&USBD1);
-#    endif
-        }
-    } else {
-#    if !defined(KEEP_USB_CONNECTION_IN_WIRELESS_MODE)
-        if (USB_DRIVER.state != USB_STOP) {
-            usbDisconnectBus(&USBD1);
-            usbStop(&USBD1);
-            usb_power_disconnect();
-        }
-#    endif
-    }
-}
 
 void suspend_power_down_kb(void) {
 #    ifdef LED_POWER_EN_PIN
