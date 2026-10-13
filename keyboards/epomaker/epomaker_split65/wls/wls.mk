@@ -9,6 +9,7 @@ SRC += wls/diag_logic.c
 SRC += wls/split_logic.c
 SRC += wls/indicator_logic.c
 SRC += wls/reset_logic.c
+SRC += wls/boot_report_logic.c
 SRC += wls/rgb_key_logic.c
 SRC += wls/sleep_order_logic.c
 SRC += wls/wls_eeprom.c

@@ -99,7 +99,15 @@ void wls_lifecycle_boot(void) {
          * of `connection_get_host()`: `connection_set_host_noeeprom` early-returns
          * when EEPROM already holds this host, so a re-read can be stale and drop
          * the line. One read, one decision, applied consistently. */
-        hsm_switch_apply_t applied = apply_switch_transport(hs_mode_switch_pos(), last_btdev_from_confinfo());
+        hsm_switch_pos_t   pos     = hs_mode_switch_pos();
+        hsm_switch_apply_t applied = apply_switch_transport(pos, last_btdev_from_confinfo());
+
+        /* Retain the decision for the diagnostic seam. The 0xA4 diag block is
+         * sampled live and needs the USB line; when a bad boot tears that line
+         * down, this retained copy is the only record of what the boot decided
+         * (see `wls/boot_report_logic`). */
+        wls_note_boot_decision((wls_boot_report_t){.switch_pos = (uint8_t)pos, .host = applied.host, .settled = (applied.kind == HSM_SWITCH_SETTLED)});
+
         /* An unsettled read applied nothing; the returned host is then not a
          * decision, so do NOT drive the USB line from it. Leaving the line as it
          * is (up, since USB power just came in) is correct: the +100 ms pass

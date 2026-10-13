@@ -46,6 +46,13 @@ static void kb_battery_send(const kb_battery_snapshot_t *snap) {
     wls_diag_gather(&diag);
     wls_diag_encode(&diag, &buf[KB_BATTERY_IDX_DIAG]);
 
+    /* The retained boot decision (the second exporter; `wls/boot_report_logic`).
+     * Its own pure encode, so a host reader and the firmware cannot drift. It is
+     * reportable even when the boot it describes tore the USB line down, because
+     * it is retained rather than sampled live. */
+    wls_boot_report_t boot_report = wls_boot_decision();
+    wls_boot_report_encode(&boot_report, &buf[KB_BATTERY_IDX_BOOT_REPORT]);
+
     raw_hid_send(buf, RAW_EPSIZE);
 }
 

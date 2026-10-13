@@ -56,6 +56,23 @@ void wls_note_boot(void) {
     wls_boot_count++;
 }
 
+/* The boot transport decision, retained across the boot that made it. The
+ * boot-time switch read (and its settled-ness) is the one decision that
+ * `wls_diag` cannot report on the failing path, because `wls_diag` rides the
+ * `0xA4` raw-HID reply and that reply needs the USB data line — exactly what a
+ * bad boot tears down. Retaining the decision here means the NEXT successful
+ * reply is a post-mortem of the failing boot. Owned here, beside the boot
+ * counter, because it is the same fact: what this boot did. */
+static wls_boot_report_t wls_boot_report;
+
+void wls_note_boot_decision(wls_boot_report_t report) {
+    wls_boot_report = report;
+}
+
+wls_boot_report_t wls_boot_decision(void) {
+    return wls_boot_report;
+}
+
 /* The shell half of the observability seam: read each live source exactly once
  * into the snapshot. `usb_line` is the firmware's own view of the USB data
  * line: upstream's connection host resolving to USB means the board intends to

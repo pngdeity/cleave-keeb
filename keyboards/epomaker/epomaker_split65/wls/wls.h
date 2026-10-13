@@ -11,6 +11,7 @@
 #include "wireless.h"
 #include "wls/transport_logic.h"
 #include "wls/diag_logic.h"
+#include "wls/boot_report_logic.h"
 #include "connection.h"
 
 #define HS_BT_DEF_PIN C14
@@ -88,6 +89,12 @@ void wls_diag_gather(wls_diag_t *out);
 /* Increment the diagnostic boot counter (once per MCU boot). */
 void wls_note_boot(void);
 
+/* The boot transport decision, retained so a later diagnostic read can report on
+ * a boot whose USB line did not survive (see `wls/boot_report_logic`). Set once
+ * by the boot seed; read by the diagnostic assembler. */
+void              wls_note_boot_decision(wls_boot_report_t report);
+wls_boot_report_t wls_boot_decision(void);
+
 /* BT profile selection, owned by the Bluetooth driver (item 14b): which of the
  * module's BT1..BT5 profiles is active, and re-pairing it. The sub-index has no
  * home in upstream's `connection` model, so it lives with the driver that
@@ -129,6 +136,14 @@ uint8_t bluetooth_get_profile(void);
  * works regardless of which transport is up, which is exactly what the
  * shell-only defects (7, 8, 9, and the USB self-detach) needed and lacked. */
 #define KB_BATTERY_IDX_DIAG 11
+
+/* The retained boot decision (`wls/boot_report_logic`), a fixed 3-byte block
+ * right after the diag block: the switch position read at boot, the host it
+ * applied, and whether that read was settled. It is retained across the boot, so
+ * a boot that tore its own USB line down is still reportable on the NEXT
+ * successful reply — the case the 6-byte diag block cannot cover, because it is
+ * sampled live and the line is gone (the un-settled-boot-read finding). */
+#define KB_BATTERY_IDX_BOOT_REPORT 17
 
 /* KB_BATTERY_IDX_CHARGE */
 enum kb_battery_charge {
