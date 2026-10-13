@@ -44,6 +44,30 @@ bool wls_sleep_ordered(void) {
     return ordered_sleep;
 }
 
+/* Boot counter for the diagnostic snapshot: increments once per MCU boot (the
+ * board calls `wls_note_boot()` from `keyboard_post_init_kb`). A stable value
+ * across successive diagnostic reads proves the MCU is NOT resetting; a value
+ * that climbs once per observed event proves it is (the disambiguator the USB
+ * self-detach investigation needed and lacked). */
+static uint8_t wls_boot_count = 0;
+
+void wls_note_boot(void) {
+    wls_boot_count++;
+}
+
+/* The shell half of the observability seam: read each live source exactly once
+ * into the snapshot. `usb_line` is the firmware's own view of the USB data
+ * line: upstream's connection host resolving to USB means the board intends to
+ * be on USB (the actuator `wls_usb_connect` drives that line from this). */
+void wls_diag_gather(wls_diag_t *out) {
+    out->switch_pos = (uint8_t)hs_mode_switch_pos();
+    out->devs       = wireless_get_current_devs();
+    out->host       = (uint8_t)connection_get_host_raw();
+    out->boot_count = wls_boot_count;
+    out->usb_line   = (connection_get_host() == CONNECTION_HOST_USB) ? 1 : 0;
+    out->link_state = *md_getp_state();
+}
+
 bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev) {
     static uint32_t scan_timer = 0x00;
 

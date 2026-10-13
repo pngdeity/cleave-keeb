@@ -10,6 +10,7 @@
 #include <stdbool.h>
 #include "wireless.h"
 #include "wls/transport_logic.h"
+#include "wls/diag_logic.h"
 #include "connection.h"
 
 #define HS_BT_DEF_PIN C14
@@ -74,6 +75,16 @@ void wls_persist_devs(void);
 void wls_led_rail_apply(void);
 void wls_indicate_devs(uint8_t new_devs, bool reset);
 
+/* Gather the shell-state diagnostic snapshot (see `wls/diag_logic`). The shell
+ * half of the observability seam: reads the live switch, device index, host,
+ * boot counter, USB line, and module link state into a `wls_diag_t`; the pure
+ * `wls_diag_encode()` turns it into bytes. Exposed so any channel that is up
+ * (the 0xA4 USB reply, the radio push) can carry it. */
+void wls_diag_gather(wls_diag_t *out);
+
+/* Increment the diagnostic boot counter (once per MCU boot). */
+void wls_note_boot(void);
+
 /* BT profile selection, owned by the Bluetooth driver (item 14b): which of the
  * module's BT1..BT5 profiles is active, and re-pairing it. The sub-index has no
  * home in upstream's `connection` model, so it lives with the driver that
@@ -106,6 +117,15 @@ uint8_t bluetooth_get_profile(void);
  * sub-code range, i.e. the MD_STATE_* value). Read-only diagnostics. */
 #define KB_BATTERY_IDX_MD_VERSION 9
 #define KB_BATTERY_IDX_MD_STATE 10
+
+/* Shell-state diagnostic block (the observability seam; `wls/diag_logic`). A
+ * fixed 6-byte view of how the firmware currently reads the world — the switch
+ * position, the device index, the connection host, a boot counter, the USB data
+ * line, and the module link state. Encoded by the pure `wls_diag_encode()` so a
+ * host reader and the firmware cannot drift. This is the one instrument that
+ * works regardless of which transport is up, which is exactly what the
+ * shell-only defects (7, 8, 9, and the USB self-detach) needed and lacked. */
+#define KB_BATTERY_IDX_DIAG 11
 
 /* KB_BATTERY_IDX_CHARGE */
 enum kb_battery_charge {

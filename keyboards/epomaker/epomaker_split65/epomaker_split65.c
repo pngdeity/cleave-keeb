@@ -158,6 +158,10 @@ void keyboard_post_init_kb(void) {
 #ifdef CONSOLE_ENABLE
     debug_enable = true;
 #endif
+    /* Diagnostic boot counter: one increment per MCU boot, so a host reader can
+     * tell a firmware reset loop from a mere USB-line drop (see `wls_diag`). */
+    wls_note_boot();
+
     eeconfig_confinfo_init();
 
 #ifdef LED_POWER_EN_PIN

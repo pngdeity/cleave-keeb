@@ -39,6 +39,13 @@ static void kb_battery_send(const kb_battery_snapshot_t *snap) {
     buf[KB_BATTERY_IDX_MD_VERSION] = md_get_version();
     buf[KB_BATTERY_IDX_MD_STATE]   = *md_getp_state();
 
+    /* Shell-state diagnostic block (the observability seam). Encoded by the pure
+     * `wls_diag_encode()` so the layout is pinned by a test, not by this call
+     * site and a host parser agreeing by hand. */
+    wls_diag_t diag;
+    wls_diag_gather(&diag);
+    wls_diag_encode(&diag, &buf[KB_BATTERY_IDX_DIAG]);
+
     raw_hid_send(buf, RAW_EPSIZE);
 }
 
