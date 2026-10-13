@@ -61,12 +61,17 @@ bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev);
 hsm_switch_pos_t hs_mode_switch_pos(void);
 
 /* Apply the switch position's transport, stated once. Reads the pure
- * `hsm_switch_apply(pos, last_bt)` and sets BOTH selectors from that single
- * decision: upstream's connection host (`_noeeprom` — the switch must not
- * overwrite the user's stored intent; only a keycode writes EEPROM) and the
- * vendor device index. Every switch-driven change goes through here, so the two
- * selectors can never be set apart (defect 7). */
-connection_host_t apply_switch_transport(hsm_switch_pos_t pos, uint8_t last_bt);
+ * `hsm_switch_apply(pos, last_bt)` and, when the position was readable, sets
+ * BOTH selectors from that single decision: upstream's connection host
+ * (`_noeeprom` — the switch must not overwrite the user's stored intent; only a
+ * keycode writes EEPROM) and the vendor device index. Every switch-driven change
+ * goes through here, so the two selectors can never be set apart (defect 7).
+ *
+ * Returns the whole `hsm_switch_apply_t`: callers must check the `kind` before
+ * acting on the host. An UNREADABLE position applies nothing (the boot
+ * self-detach fix) and the returned `host` is then not a decision — a caller
+ * must not drive the USB line from it. */
+hsm_switch_apply_t apply_switch_transport(hsm_switch_pos_t pos, uint8_t last_bt);
 /* Restart the active link countdown (reconnect/sleep) from now, on an activity
  * event such as a keypress or wake. The countdown's policy lives in the pure
  * `hsm_link_watch`; this is only the store-back shell. */

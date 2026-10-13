@@ -238,18 +238,51 @@ TEST_F(TransportLogic, sleep_order_is_a_pure_function_of_battery_and_charge) {
 TEST_F(TransportLogic, switch_position_yields_a_matched_devs_and_host_pair) {
     /* USB: device index USB, host USB. */
     hsm_switch_apply_t usb = hsm_switch_apply(HSM_SWITCH_USB, DEVS_BT3);
+    EXPECT_EQ(HSM_SWITCH_SETTLED, usb.kind);
     EXPECT_EQ(DEVS_USB, usb.devs);
     EXPECT_EQ(HSM_HOST_USB, usb.host);
 
     /* 2.4 GHz: device index 2.4 GHz, host 2.4 GHz, whatever was persisted. */
     hsm_switch_apply_t g24 = hsm_switch_apply(HSM_SWITCH_2G4, DEVS_BT1);
+    EXPECT_EQ(HSM_SWITCH_SETTLED, g24.kind);
     EXPECT_EQ(DEVS_2G4, g24.devs);
     EXPECT_EQ(HSM_HOST_2P4GHZ, g24.host);
 
     /* BT: the persisted sub-index picks which of BT1..5, host BLUETOOTH. */
     hsm_switch_apply_t bt = hsm_switch_apply(HSM_SWITCH_BT, DEVS_BT2);
+    EXPECT_EQ(HSM_SWITCH_SETTLED, bt.kind);
     EXPECT_EQ(DEVS_BT2, bt.devs);
     EXPECT_EQ(HSM_HOST_BLUETOOTH, bt.host);
+}
+
+/* The regression guard for the boot self-detach (docs/FINDINGS.md, "the boot
+ * switch read is un-settled"). An unreadable switch position must yield
+ * HSM_SWITCH_UNREADABLE and carry NO transport -- for EVERY persisted sub-index
+ * -- because the earlier design mapped unknown -> the persisted BT index ->
+ * "Bluetooth", which tore the USB data line down at boot on the USB position.
+ * This is the case that makes that mapping impossible: a fallback with no
+ * distinguishable "unknown" is exactly what must never come back. */
+TEST_F(TransportLogic, unreadable_switch_position_carries_no_transport) {
+    /* Every persisted sub-index, BT1..5 and the USB/2.4GHz ones included. */
+    const uint8_t last_bt_values[] = {DEVS_USB, DEVS_BT1, DEVS_BT2, DEVS_BT3, DEVS_BT4, DEVS_BT5, DEVS_2G4};
+    for (uint8_t last_bt : last_bt_values) {
+        hsm_switch_apply_t r = hsm_switch_apply(HSM_SWITCH_UNKNOWN, last_bt);
+        EXPECT_EQ(HSM_SWITCH_UNREADABLE, r.kind) << "last_bt " << int(last_bt);
+        /* No decision may be smuggled out in the payload: neither selector may
+         * hold a value a caller could apply. 0 is a valid `DEVS_USB`, so the
+         * payload must be poisoned (0xFF), not merely zeroed. */
+        EXPECT_EQ(0xFF, r.devs) << "last_bt " << int(last_bt);
+        EXPECT_EQ(0xFF, r.host) << "last_bt " << int(last_bt);
+    }
+}
+
+/* Every readable position is settled and yields a decision; only the unknown
+ * position is unreadable. This is the other half of the guard: the fix must not
+ * have made a real position unusable. */
+TEST_F(TransportLogic, every_readable_position_is_settled) {
+    EXPECT_EQ(HSM_SWITCH_SETTLED, hsm_switch_apply(HSM_SWITCH_USB, DEVS_BT1).kind);
+    EXPECT_EQ(HSM_SWITCH_SETTLED, hsm_switch_apply(HSM_SWITCH_BT, DEVS_BT1).kind);
+    EXPECT_EQ(HSM_SWITCH_SETTLED, hsm_switch_apply(HSM_SWITCH_2G4, DEVS_BT1).kind);
 }
 
 /* The host mapper is total and matches the firmware's `connection_host_t`: USB

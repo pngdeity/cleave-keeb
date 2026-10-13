@@ -60,6 +60,16 @@ uint8_t hsm_host_of_devs(uint8_t devs) {
 
 hsm_switch_apply_t hsm_switch_apply(hsm_switch_pos_t pos, uint8_t last_bt) {
     hsm_switch_apply_t result;
+    /* An unreadable position carries NO transport: mark the kind and poison the
+     * payload, so even a caller that ignores `kind` cannot read out a valid
+     * device index or host (0 is a valid `DEVS_USB`, so zeroing is not enough). */
+    if (pos == HSM_SWITCH_UNKNOWN) {
+        result.kind = HSM_SWITCH_UNREADABLE;
+        result.devs = 0xFF;
+        result.host = 0xFF;
+        return result;
+    }
+    result.kind = HSM_SWITCH_SETTLED;
     result.devs = hsm_boot_devs(pos, last_bt);
     result.host = hsm_host_of_devs(result.devs);
     return result;

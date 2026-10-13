@@ -86,6 +86,12 @@ void wls_lifecycle_boot(void) {
      * precede it; that pass remains for boards/branches we do not reach here. */
 #    if defined(HS_BT_DEF_PIN) && defined(HS_2G4_DEF_PIN)
     {
+        /* The pull-ups above were enabled in this same pass, and `palSetLineMode`
+         * takes effect asynchronously: a read taken now can see the old floating
+         * level and yield HSM_SWITCH_UNKNOWN. Wait for the pin to settle before
+         * the first read (the sleep path already uses this idiom). */
+        waitInputPinDelay();
+
         /* Seed the transport from the switch before any report can be sent: the
          * shared applier sets BOTH selectors (host + device index) from one
          * switch read, so no report can precede the switch's authority. */
@@ -93,8 +99,15 @@ void wls_lifecycle_boot(void) {
          * of `connection_get_host()`: `connection_set_host_noeeprom` early-returns
          * when EEPROM already holds this host, so a re-read can be stale and drop
          * the line. One read, one decision, applied consistently. */
-        connection_host_t applied = apply_switch_transport(hs_mode_switch_pos(), last_btdev_from_confinfo());
-        wls_usb_connect(applied == CONNECTION_HOST_USB);
+        hsm_switch_apply_t applied = apply_switch_transport(hs_mode_switch_pos(), last_btdev_from_confinfo());
+        /* An unsettled read applied nothing; the returned host is then not a
+         * decision, so do NOT drive the USB line from it. Leaving the line as it
+         * is (up, since USB power just came in) is correct: the +100 ms pass
+         * re-seeds once the pin is reliable. Driving `wls_usb_connect(false)` here
+         * on an unknown read is exactly the self-detach this guards against. */
+        if (applied.kind == HSM_SWITCH_SETTLED) {
+            wls_usb_connect(applied.host == HSM_HOST_USB);
+        }
     }
 #    endif
     post_init_timer = timer_read32();

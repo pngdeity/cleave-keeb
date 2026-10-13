@@ -67,13 +67,32 @@ uint8_t hsm_boot_devs(hsm_switch_pos_t pos, uint8_t last_bt);
  * before (defect 7). */
 uint8_t hsm_host_of_devs(uint8_t devs);
 
-/* The pair the switch position selects. `devs` is the vendor device index (as
- * `hsm_boot_devs`), `host` is the matching connection host. The caller decides
- * whether the pair persists (a user keycode: yes) or not (the switch: no, the
- * switch is re-read every boot and must not overwrite stored intent). */
+/* Whether the switch position could actually be read. A pin read taken before
+ * the pull-up has settled (or with the switch absent or mid-travel) yields
+ * HSM_SWITCH_UNKNOWN, and an unknown position is NOT a transport decision: it
+ * must not be applied. Making indeterminacy a *kind* the caller must name (see
+ * `hsm_switch_apply_t` below) is what makes the boot self-detach unrepresentable
+ * -- see docs/FINDINGS.md, "the boot switch read is un-settled". */
+typedef enum {
+    HSM_SWITCH_SETTLED = 0, /* the position was readable; `devs`/`host` are meaningful */
+    HSM_SWITCH_UNREADABLE,  /* no decision: apply NOTHING and leave both selectors */
+} hsm_switch_read_t;
+
+/* The transport the switch position selects, as a variant: the `devs`/`host`
+ * pair exists ONLY in the settled case, so a caller cannot construct -- or be
+ * handed -- a pair that was never actually read. `devs` is the vendor device
+ * index (as `hsm_boot_devs`); `host` is the matching connection host. The caller
+ * decides whether the pair persists (a user keycode: yes) or not (the switch:
+ * no, the switch is re-read every boot and must not overwrite stored intent).
+ *
+ * The shape is deliberately the same tagged-kind form as `wls_blink_out_t` and
+ * `filp_action_t`: kind first, payload meaningful only for one kind. An earlier
+ * design mapped unknown -> the persisted BT index -> "Bluetooth", which silently
+ * tore down the USB data line at boot on the USB switch position. */
 typedef struct {
-    uint8_t devs; /* DEVS_USB / DEVS_BT1..5 / DEVS_2G4 */
-    uint8_t host; /* CONNECTION_HOST_* */
+    hsm_switch_read_t kind; /* HSM_SWITCH_SETTLED -> read devs/host; UNREADABLE -> neither */
+    uint8_t           devs; /* DEVS_USB / DEVS_BT1..5 / DEVS_2G4 (settled only) */
+    uint8_t           host; /* CONNECTION_HOST_* (settled only) */
 } hsm_switch_apply_t;
 
 hsm_switch_apply_t hsm_switch_apply(hsm_switch_pos_t pos, uint8_t last_bt);
