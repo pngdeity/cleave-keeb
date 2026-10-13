@@ -7,6 +7,7 @@
 #include "wls/keymap_logic.h"
 #include "wls/wls_eeprom.h"
 #include "wls/wls_usb.h"
+#include "wls/split_logic.h"
 #include "rgb_record/rgb_record.h"
 #include "quantum.h"
 #include "connection.h"
@@ -73,17 +74,24 @@ typedef struct _slave_to_master_t {
     uint8_t body[4];
 } slave_to_master_t;
 
-void master_sync_mms_slave(uint8_t last_mode, uint8_t now_mode, uint8_t reset) {
+/* The one way the master sends a command over the split link. Every master-side
+ * sender used to open-code `transaction_rpc_exec(USER_SYNC_MMS, ...)`; routing
+ * them through one primitive keeps the wire call (and its `master_to_slave_t`
+ * shape) stated once. The policy -- which command, when -- stays at the call
+ * site, where it belongs. */
+static bool wls_split_send(uint8_t cmd, const uint8_t body[4]) {
     master_to_slave_t m2s = {0};
     slave_to_master_t s2m = {0};
-    m2s.cmd               = 0x55;
-    m2s.body[0]           = last_mode;
-    m2s.body[1]           = now_mode;
-    m2s.body[2]           = reset;
-    if (transaction_rpc_exec(USER_SYNC_MMS, sizeof(m2s), &m2s, sizeof(s2m), &s2m)) {
-        if (s2m.resp == 0x00) {
-            ;
-        }
+    m2s.cmd               = cmd;
+    if (body != NULL) {
+        memcpy(m2s.body, body, sizeof(m2s.body));
+    }
+    return transaction_rpc_exec(USER_SYNC_MMS, sizeof(m2s), &m2s, sizeof(s2m), &s2m);
+}
+
+void master_sync_mms_slave(uint8_t last_mode, uint8_t now_mode, uint8_t reset) {
+    const uint8_t body[4] = {last_mode, now_mode, reset, 0};
+    if (wls_split_send(WLS_SPLIT_CMD_SYNC_MULTIMODE, body)) {
         dprintf("Slave Sleep OK1\n");
     } else {
         dprintf("Slave sync failed1!\n");
@@ -208,12 +216,7 @@ void suspend_wakeup_init_user(void) {
         return;
     }
 
-    master_to_slave_t m2s = {0};
-    slave_to_master_t s2m = {0};
-    m2s.cmd               = 0xCC;
-    if (transaction_rpc_exec(USER_SYNC_MMS, sizeof(m2s), &m2s, sizeof(s2m), &s2m)) {
-        if (s2m.resp == 0x00) {
-        }
+    if (wls_split_send(WLS_SPLIT_CMD_WAKEUP, NULL)) {
         dprintf("Slave Sleep OK\n");
     } else {
         dprint("Slave sync failed!\n");
@@ -225,12 +228,7 @@ void suspend_power_down_user(void) {
         return;
     }
 
-    master_to_slave_t m2s = {0};
-    slave_to_master_t s2m = {0};
-    m2s.cmd               = 0xBB;
-    if (transaction_rpc_exec(USER_SYNC_MMS, sizeof(m2s), &m2s, sizeof(s2m), &s2m)) {
-        if (s2m.resp == 0x00) {
-        }
+    if (wls_split_send(WLS_SPLIT_CMD_POWER_DOWN, NULL)) {
         dprintf("Slave Sleep OK\n");
     } else {
         dprint("Slave sync failed!\n");
@@ -259,13 +257,8 @@ bool lpwr_is_allow_presleep_hook(void) {
     extern bool charging_state;
 
     if (is_keyboard_master()) {
-        master_to_slave_t m2s = {0};
-        slave_to_master_t s2m = {0};
-        m2s.cmd               = 0xAA;
-        m2s.body[0]           = wls_sleep_ordered();
-        if (transaction_rpc_exec(USER_SYNC_MMS, sizeof(m2s), &m2s, sizeof(s2m), &s2m)) {
-            if (s2m.resp == 0x00) {
-            }
+        const uint8_t body[4] = {wls_sleep_ordered(), 0, 0, 0};
+        if (wls_split_send(WLS_SPLIT_CMD_SLEEP, body)) {
             dprintf("Slave Sleep OK\n");
         } else {
             dprint("Slave sync failed!\n");
@@ -1247,12 +1240,7 @@ bool rgb_matrix_indicators_advanced_kb(uint8_t led_min, uint8_t led_max) {
 
 void hs_reset_settings(void) {
     if (is_keyboard_master()) {
-        master_to_slave_t m2s = {0};
-        slave_to_master_t s2m = {0};
-        m2s.cmd               = 0xDD;
-        if (transaction_rpc_exec(USER_SYNC_MMS, sizeof(m2s), &m2s, sizeof(s2m), &s2m)) {
-            if (s2m.resp == 0x00) {
-            }
+        if (wls_split_send(WLS_SPLIT_CMD_RESET_SETTINGS, NULL)) {
             dprintf("Slave Sleep OK\n");
         } else {
             dprintf("Slave sync failed!\n");
@@ -1301,37 +1289,38 @@ void user_sync_mms_slave_handler(uint8_t in_buflen, const void *in_data, uint8_t
     const master_to_slave_t *m2s = (const master_to_slave_t *)in_data;
     slave_to_master_t       *s2m = (slave_to_master_t *)out_data;
 
-    switch (m2s->cmd) {
-        case 0x55: // sync multimode
-            wireless_devs_change(m2s->body[0], m2s->body[1], false);
+    /* The wire is upstream's RPC; *what each command means* is the pure
+     * `wls_split_decide_slave()` (wls/split_logic). This handler only applies
+     * the decided action. */
+    wls_split_action_t action = wls_split_decide_slave(m2s->cmd, m2s->body);
+
+    switch (action.kind) {
+        case WLS_SPLIT_ACT_SYNC_DEVICE_INDEX:
+            wireless_devs_change(action.last_devs, action.now_devs, false);
             s2m->resp = 0x00;
             break;
-        case 0xAA:
+        case WLS_SPLIT_ACT_ORDER_SLEEP:
             if (wireless_get_current_devs() != DEVS_USB) {
                 palSetLineMode(SERIAL_USART_RX_PIN, PAL_OUTPUT_TYPE_OPENDRAIN);
                 palSetLineMode(SERIAL_USART_TX_PIN, PAL_OUTPUT_TYPE_OPENDRAIN);
             }
             s2m->resp = 0x00;
-            wls_order_sleep(m2s->body[0]);
+            wls_order_sleep(action.sleep_flag);
             lpwr_set_timeout_manual(true);
             break;
-        case 0xBB:
-            /* The master is suspending. Do not force this half's rail off: on
-             * this board the rail is derived from the RGB value and has one
-             * owner (`wls_led_rail_apply()`), so a forced-off here is exactly the
-             * latch that left a half dark while it still typed (defect 5). The
-             * slave's own suspend path drops the rail when it actually sleeps. */
-            s2m->resp = 0x00;
-            break;
-        case 0xCC:
+        case WLS_SPLIT_ACT_REAPPLY_RAIL:
             wls_led_rail_apply();
             s2m->resp = 0x00;
             break;
-        case 0xDD:
+        case WLS_SPLIT_ACT_RESET_SETTINGS:
             hs_reset_settings();
             s2m->resp = 0x00;
             break;
+        case WLS_SPLIT_ACT_NONE:
         default:
+            /* The master-suspend command (0xBB) lands here deliberately: the
+             * slave must not force its own rail off (defect 5). An unknown
+             * command also lands here -- stay silent, act on nothing. */
             break;
     }
 }
