@@ -71,9 +71,7 @@ connection_host_t apply_switch_transport(hsm_switch_pos_t pos, uint8_t last_bt);
  * event such as a keypress or wake. The countdown's policy lives in the pure
  * `hsm_link_watch`; this is only the store-back shell. */
 void hs_link_activity(void);
-void wls_persist_devs(void);
 void wls_led_rail_apply(void);
-void wls_indicate_devs(uint8_t new_devs, bool reset);
 
 /* Gather the shell-state diagnostic snapshot (see `wls/diag_logic`). The shell
  * half of the observability seam: reads the live switch, device index, host,

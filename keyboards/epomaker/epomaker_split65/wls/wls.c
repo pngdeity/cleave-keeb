@@ -5,6 +5,7 @@
 #include "usb_descriptor.h"
 #include "lowpower_logic.h"
 #include "transport_logic.h"
+#include "wls_indicator.h"
 #include "connection.h"
 
 static ioline_t col_pins_left[MATRIX_COLS]  = MATRIX_COL_PINS;

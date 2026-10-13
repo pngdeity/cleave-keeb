@@ -7,6 +7,8 @@
 #include "wls/wls_eeprom.h"
 #include "wls/wls_split.h"
 #include "wls/split_logic.h"
+#include "wls/reset_logic.h"
+#include "wls/wls_indicator.h"
 #include "wls/transport_logic.h"
 #include "wls/wls_usb.h"
 #include "quantum.h"
@@ -253,4 +255,58 @@ void wls_lifecycle_housekeeping(void) {
         md_send_devctrl(MD_SND_CMD_DEVCTRL_INQVOL);
     }
 #endif
+}
+
+/* Execute the reset plan. The *policy* (which consequences, in what order, and
+ * the one thing the cause changes) is the pure `wls_reset_plan_of()`
+ * (wls/reset_logic); this function only performs the steps it names. Two
+ * unrelated triggers reach it -- the `EE_CLR` hold timer (LOCAL) and the split
+ * slave handler (REMOTE); the cause is the whole reason that handler no longer
+ * needs to call back into the lifecycle module. */
+void wls_reset_settings(wls_reset_cause_t cause) {
+    wls_reset_plan_t plan = wls_reset_plan_of(cause);
+
+    for (uint8_t i = 0; i < plan.count; i++) {
+        switch (plan.steps[i]) {
+            case WLS_RESET_STEP_NOTIFY_PEER:
+                if (is_keyboard_master()) {
+                    if (wls_split_send(WLS_SPLIT_CMD_RESET_SETTINGS, NULL)) {
+                        dprintf("Slave Sleep OK\n");
+                    } else {
+                        dprintf("Slave sync failed!\n");
+                    }
+                }
+                break;
+            case WLS_RESET_STEP_WIPE_CONFIG:
+                wls_bat_suppress_arm();
+                eeconfig_init();
+                eeconfig_update_rgb_matrix_default();
+
+#ifdef RGBLIGHT_ENABLE
+                extern void rgblight_init(void);
+                is_rgblight_initialized = false;
+                rgblight_init();
+                eeconfig_update_rgblight_default();
+                rgblight_enable();
+#endif
+
+                eeconfig_read_keymap(&keymap_config);
+
+#if defined(NKRO_ENABLE) && defined(FORCE_NKRO)
+                keymap_config.nkro = 0;
+                eeconfig_update_keymap(&keymap_config);
+#endif
+                break;
+            case WLS_RESET_STEP_FLASH:
+                /* The acknowledgement flash; a refusal here ends the reset. */
+                if (hs_reset_settings_user() != true) {
+                    return;
+                }
+                break;
+            case WLS_RESET_STEP_RERUN_BOOT:
+                hs_link_activity();
+                wls_lifecycle_boot();
+                break;
+        }
+    }
 }

@@ -36,3 +36,8 @@ bool wls_split_send(uint8_t cmd, const uint8_t body[4]);
  * decodes the command with the pure `wls_split_decide_slave()` and applies the
  * decided action. */
 void user_sync_mms_slave_handler(uint8_t in_buflen, const void *in_data, uint8_t out_buflen, void *out_data);
+
+/* Tell the slave which device index the master is on. Sent by the master's
+ * periodic housekeeping sync; only meaningful when the master's own device index
+ * changed. */
+void master_sync_mms_slave(uint8_t last_mode, uint8_t now_mode, uint8_t reset);

@@ -6,6 +6,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "wls/reset_logic.h"
+
 /* The board's lifecycle hooks, as delegates.
  *
  * QMK calls the board at fixed points: boot, suspend/resume, the low-power
@@ -37,3 +39,11 @@ void wls_lifecycle_lpwr_wakeup(void);
 /* The per-loop passes. */
 void wls_lifecycle_wireless_post_task(void);
 void wls_lifecycle_housekeeping(void);
+
+/* Execute the settings-reset plan. The *policy* (which consequences, in what
+ * order, and the one thing the cause changes) is the pure `wls_reset_plan_of()`
+ * (wls/reset_logic); this function only performs the steps it names. Two
+ * unrelated triggers reach it — the `EE_CLR` hold timer (LOCAL, from the
+ * indicator pass) and the split slave handler (REMOTE) — so the executor lives
+ * with the lifecycle module and both callers name only a cause. */
+void wls_reset_settings(wls_reset_cause_t cause);

@@ -19,3 +19,12 @@ bool wls_split_send(uint8_t cmd, const uint8_t body[4]) {
     }
     return transaction_rpc_exec(USER_SYNC_MMS, sizeof(m2s), &m2s, sizeof(s2m), &s2m);
 }
+
+void master_sync_mms_slave(uint8_t last_mode, uint8_t now_mode, uint8_t reset) {
+    const uint8_t body[4] = {last_mode, now_mode, reset, 0};
+    if (wls_split_send(WLS_SPLIT_CMD_SYNC_MULTIMODE, body)) {
+        dprintf("Slave Sleep OK1\n");
+    } else {
+        dprintf("Slave sync failed1!\n");
+    }
+}
