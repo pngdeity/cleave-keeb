@@ -10,18 +10,26 @@
  * (`wls/wls.c`) so the transport state machine can be tested without the MCU.
  *
  * The transport is a *decision over several inputs*, not the switch alone. The
- * physical switch is the user's primary affordance and the richest expression of
- * intent, but it is only a hint: it is read through pins that can lie (a settled
- * 2.4 GHz read with a host cable present is the failure this file encodes
- * against), and it says nothing about whether a host or merely a power supply is
- * on the other end of the cable. The two inputs that outrank it are the cable
- * (`B9`, this half has *a* cable) and the USB peripheral's own enumeration result
- * (`USB_ACTIVE`, a host is really there) -- see `hsm_switch_apply_with_cable` and
- * `hsm_transport_decide`. Software persistence may only model what the switch
- * cannot express -- which of BT1..5, once the switch merely says "BT" -- and
- * serves as the fallback when the switch read is unreadable. The original defect
- * this file encodes against is a *persisted* transport surviving a reboot with
- * the switch elsewhere ("enumerated but no keys"; TODO.md defect 4). */
+ * physical switch is the user's primary affordance and the only input that
+ * expresses intent, so where it is readable it is authoritative: it is read
+ * through pins that can lie, but nothing else on the board says "wireless" or
+ * "USB" as an intention. Two facts can override it, and both are facts rather
+ * than intentions: a *confirmed* host (the USB peripheral's own enumeration
+ * result, `USB_ACTIVE` -- a real host is there) and an unreadable switch read,
+ * which carries no intent at all and falls back to the persisted index. See
+ * `hsm_input_rule`.
+ *
+ * A cable is NOT one of these inputs. A cable-detect pin says "power is
+ * available", not "route HID here": a charger, a power bank, a phone and a PC
+ * all raise it identically, so treating it as a transport would force USB for a
+ * power-only supply -- which is the requirement-2 failure (a cable with no host
+ * leaves the board on a transport there is nothing to type to). The cable is
+ * therefore a *power* fact and reaches no transport rule. Software persistence
+ * may only model what the switch cannot express -- which of BT1..5, once the
+ * switch merely says "BT" -- and serves as the fallback when the switch read is
+ * unreadable. The original defect this file encodes against is a *persisted*
+ * transport surviving a reboot with the switch elsewhere ("enumerated but no
+ * keys"; TODO.md defect 4). */
 
 /* Which switch position the two pins encode. */
 typedef enum {
@@ -118,45 +126,35 @@ typedef struct {
 
 hsm_switch_apply_t hsm_switch_apply(hsm_switch_pos_t pos, uint8_t last_bt);
 
-/* The cable-aware rule: the switch as ONE INPUT among several, not the sole
- * authority.
+/* The input rule: the switch is the transport, the cable is only power.
  *
- * `cable_here` is a settled `B9` read -- "THIS half has the host cable" (see
- * `docs/HARDWARE.md`, "B9 is USB cable detection"). Precedence, most reliable
- * signal first: (1) a cable present yields USB regardless of `pos`; (2) a
- * settled `pos` yields its transport; (3) an unreadable `pos` yields the
- * persisted `last_bt`. Case (1) is what makes the observed failure -- a settled
- * wireless read with a cable present, sending HID to the module while the host
- * hears nothing -- unrepresentable.
+ * The switch position IS the user's transport intent, and it is the only signal
+ * that expresses intent at all. A cable does not: a cable to a wall charger, a
+ * power bank, a phone or a PC are electrically indistinguishable at the moment
+ * the decision is made, and all of them raise the cable-detect pin. Treating a
+ * cable as a transport input therefore *cannot* honour "charge from a power-only
+ * supply while staying on the radio" -- it can only force USB, which is exactly
+ * the requirement-2 failure (a power-only cable leaving the keyboard silent on a
+ * transport there is nothing to type to).
+ *
+ * Precedence:
+ *   1. settled `pos`   -> the switch's transport. Authoritative.
+ *   2. unreadable `pos` -> `DEVS_USB` when a host is confirmed (`host_confirmed`
+ *      is upstream's own enumeration result, so a real host is a fact); otherwise
+ *      the persisted `last_bt`. An unconfirmed unreadable read prefers USB because
+ *      a boot-time pin read is the least trustworthy input and USB is the
+ *      recoverable answer -- there is always a host on the other end of a real
+ *      cable, and an unreadable read with no host is not a transport decision
+ *      worth inventing a wireless route for.
+ *
+ * A confirmed host still outranks a lying switch through `host_confirmed` here,
+ * which is why this rule subsumes the previous two-stage composition rather than
+ * needing it: there is no separate "cable" stage to get wrong.
  *
  * Always returns HSM_SWITCH_SETTLED: this rule always produces a transport,
  * because it has a fallback for every input. Callers that must distinguish
  * "nothing was applied" use `hsm_switch_apply` instead. */
-hsm_switch_apply_t hsm_switch_apply_with_cable(hsm_switch_pos_t pos, uint8_t last_bt, bool cable_here);
-
-/* The two-stage rule: hints first, then the USB peripheral's own confirmation.
- *
- * Everything above decides from *intent* -- the switch, the cable-detect pin.
- * Neither can distinguish "a host is connected" from "something is supplying
- * power": a dumb PSU raises `B9` and provides VBUS just as a host does, so a
- * cable-only rule would force USB and leave the keyboard silent with nothing to
- * type to. The only input that answers "is a host really there" is the device's
- * own enumeration result, `usb_connected_state()` (`USB_ACTIVE`), which a PSU
- * never reaches -- but it resolves LATE (only after enumeration), so it cannot
- * stand alone: before it is known, a host and a PSU look identical.
- *
- * So the decision has two stages, and this is the second:
- *   1. `usb_active` -> USB. A confirmed host is a fact; it outranks every hint,
- *      including a switch that lies.
- *   2. otherwise    -> `hint`, the caller's cable/switch/persisted decision.
- *      A PSU never reaches stage 1, so the hint stands and the board stays
- *      wireless instead of going silent.
- *
- * `hint` is passed in already resolved (run `hsm_switch_apply_with_cable` for
- * it), so this composes rather than duplicates and stays pure over plain values.
- * `usb_active` comes from `usb_connected_state()` -- the caller re-runs this
- * when that *changes* (an edge), not every tick, since the decision is stable. */
-hsm_switch_apply_t hsm_transport_decide(hsm_switch_apply_t hint, bool usb_active);
+hsm_switch_apply_t hsm_input_rule(hsm_switch_pos_t pos, uint8_t last_bt, bool host_confirmed);
 
 /* Whether committing `decision` over `committed` is a CHANGE.
  *

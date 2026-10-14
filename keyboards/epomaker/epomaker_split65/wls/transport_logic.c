@@ -92,76 +92,31 @@ hsm_switch_apply_t hsm_switch_apply(hsm_switch_pos_t pos, uint8_t last_bt) {
     return result;
 }
 
-/* The switch is one INPUT among several, not the sole authority.
+/* The input rule: the switch is the transport, the cable is only power.
  *
- * The switch alone was treated as absolute, so a single wrong pin read routed
- * every keystroke to a transport that was not there: a settled read of 2.4 GHz
- * with a host cable present sends HID to the module UART and nothing reaches the
- * host -- "enumerated, lit, silent" (the magenta boot blink). The cable is a
- * physical fact and outranks a switch *preference*, so `cable_here` (a settled
- * `B9` read: this half has the host cable) wins outright; an unreadable switch
- * then degrades to the persisted intent instead of poisoning the decision.
+ * A cable cannot be a transport input. A wall charger, a power bank, a phone and
+ * a PC all raise the cable-detect pin, and at decision time they are
+ * indistinguishable -- so "a cable means USB" can only ever force USB, which is
+ * precisely the requirement-2 failure: a power-only cable leaves the keyboard on
+ * a transport there is nothing to type to, while the switch asked for wireless.
  *
- * Precedence is "trust the most reliable signal that is present", highest first:
- *   1. cable present        -> USB, regardless of the switch
- *   2. switch settled       -> the switch's transport
- *   3. switch unreadable    -> the persisted device index
- * There is no case where a cable is present and the answer is not USB, which is
- * what makes the observed failure unrepresentable. */
-hsm_switch_apply_t hsm_switch_apply_with_cable(hsm_switch_pos_t pos, uint8_t last_bt, bool cable_here) {
-    if (cable_here) {
-        hsm_switch_apply_t usb;
-        usb.kind = HSM_SWITCH_SETTLED;
-        usb.devs = HSM_DEVS_USB;
-        usb.host = HSM_HOST_USB;
-        return usb;
+ * The switch, by contrast, is the user's intent and the only signal that
+ * expresses it. Where the switch is readable it is authoritative. Where it is
+ * not, a *confirmed* host (upstream's own enumeration result -- a fact, not a
+ * hint) gives USB; with no such host, the persisted intent is the best answer. */
+hsm_switch_apply_t hsm_input_rule(hsm_switch_pos_t pos, uint8_t last_bt, bool host_confirmed) {
+    if (pos != HSM_SWITCH_UNKNOWN) {
+        return hsm_switch_apply(pos, last_bt);
     }
-    /* No cable: the switch is now the best available intent. An unreadable read
-     * still carries no transport, but rather than leaving both selectors at
-     * whatever they were, fall back to the persisted device index -- the last
-     * known-good intent survives a reboot, so it is a better answer than the
-     * stale live value the caller happened to hold. */
-    if (pos == HSM_SWITCH_UNKNOWN) {
-        hsm_switch_apply_t result;
-        result.kind = HSM_SWITCH_SETTLED;
+    hsm_switch_apply_t result;
+    result.kind = HSM_SWITCH_SETTLED;
+    if (host_confirmed) {
+        result.devs = HSM_DEVS_USB;
+    } else {
         result.devs = hsm_btdev_or(last_bt, HSM_DEVS_USB);
-        result.host = hsm_host_of_devs(result.devs);
-        return result;
     }
-    return hsm_switch_apply(pos, last_bt);
-}
-
-/* The two-stage rule: hints first, then the USB peripheral's own confirmation.
- *
- * `hsm_switch_apply_with_cable` decides from *intent* signals -- the switch and
- * the cable-detect pin. Neither can tell "a host is connected" from "something
- * is supplying power": a dumb PSU raises `B9` and provides VBUS exactly as a
- * host does, so `cable_here` alone would force USB and leave the keyboard silent
- * with nothing to type to. The only input that answers the real question is the
- * device's own enumeration result, `usb_connected_state()`
- * (`USB_DRIVER.state == USB_ACTIVE`), which a PSU never reaches.
- *
- * That signal arrives *late* (only after enumeration, ~100 ms+), so it cannot be
- * the only input: before it resolves, a genuine host is indistinguishable from a
- * PSU. Hence two stages:
- *   1. USB active   -> USB. A confirmed host is a fact, and it outranks every
- *                      hint (it also fixes a switch that lies).
- *   2. otherwise    -> the hint (`hint`), which is the caller's cable/switch/
- *                      persisted decision. A PSU never reaches stage 1, so the
- *                      hint stands and the board stays wireless.
- *
- * `hint` is passed in already resolved (the caller runs
- * `hsm_switch_apply_with_cable` for it) so this core composes rather than
- * duplicates, and stays pure over plain values. */
-hsm_switch_apply_t hsm_transport_decide(hsm_switch_apply_t hint, bool usb_active) {
-    if (usb_active) {
-        hsm_switch_apply_t usb;
-        usb.kind = HSM_SWITCH_SETTLED;
-        usb.devs = HSM_DEVS_USB;
-        usb.host = HSM_HOST_USB;
-        return usb;
-    }
-    return hint;
+    result.host = hsm_host_of_devs(result.devs);
+    return result;
 }
 
 bool hsm_transport_changed(uint8_t decision_host, uint8_t decision_devs, uint8_t committed_host, uint8_t committed_devs) {

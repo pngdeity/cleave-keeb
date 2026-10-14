@@ -257,50 +257,64 @@ TEST_F(TransportLogic, switch_position_yields_a_matched_devs_and_host_pair) {
     EXPECT_EQ(HSM_HOST_BLUETOOTH, bt.host);
 }
 
-/* The switch is one INPUT among several, not the sole authority.
- *
- * A host cable is a physical fact and outranks a switch preference: for EVERY
- * switch position and every persisted sub-index, a settled cable read must land
- * on USB. This is the invariant that makes the observed failure -- a settled
- * wireless read with a cable present, sending HID to the module while the host
- * hears nothing ("enumerated, lit, silent") -- unrepresentable rather than
- * merely unlikely. */
-TEST_F(TransportLogic, cable_outranks_the_switch_for_every_input) {
-    const hsm_switch_pos_t positions[]      = {HSM_SWITCH_UNKNOWN, HSM_SWITCH_USB, HSM_SWITCH_BT, HSM_SWITCH_2G4};
+/* The switch IS the transport, and a cable is only power. For EVERY switch
+ * position and every persisted sub-index, the input rule returns the switch's own
+ * transport regardless of a cable -- because a cable-detect pin cannot express
+ * intent: a charger, a power bank, a phone and a PC all raise it identically, so
+ * honouring it as transport would force USB for a power-only supply and leave the
+ * keyboard on a transport there is nothing to type to. This is requirement 2. */
+TEST_F(TransportLogic, the_switch_decides_for_every_input_regardless_of_power) {
+    const hsm_switch_pos_t positions[]      = {HSM_SWITCH_USB, HSM_SWITCH_BT, HSM_SWITCH_2G4};
     const uint8_t          last_bt_values[] = {DEVS_USB, DEVS_BT1, DEVS_BT3, DEVS_BT5, DEVS_2G4};
     for (hsm_switch_pos_t pos : positions) {
         for (uint8_t last_bt : last_bt_values) {
-            hsm_switch_apply_t r = hsm_switch_apply_with_cable(pos, last_bt, true);
-            EXPECT_EQ(HSM_SWITCH_SETTLED, r.kind) << "pos " << int(pos);
-            EXPECT_EQ(DEVS_USB, r.devs) << "pos " << int(pos) << " last_bt " << int(last_bt);
-            EXPECT_EQ(HSM_HOST_USB, r.host) << "pos " << int(pos) << " last_bt " << int(last_bt);
+            /* With a host confirmed and without: a readable switch is honoured. */
+            hsm_switch_apply_t no_host  = hsm_input_rule(pos, last_bt, false);
+            hsm_switch_apply_t with_host = hsm_input_rule(pos, last_bt, true);
+            EXPECT_EQ(HSM_SWITCH_SETTLED, no_host.kind) << "pos " << int(pos);
+            EXPECT_EQ(hsm_switch_apply(pos, last_bt).devs, no_host.devs) << "pos " << int(pos) << " last_bt " << int(last_bt);
+            EXPECT_EQ(hsm_switch_apply(pos, last_bt).host, no_host.host) << "pos " << int(pos) << " last_bt " << int(last_bt);
+            /* A confirmed host cannot hijack a wireless switch position: the
+             * switch is the only available discriminator between a PC host and a
+             * phone host, so it must be authoritative for both. */
+            EXPECT_EQ(hsm_switch_apply(pos, last_bt).devs, with_host.devs) << "pos " << int(pos) << " last_bt " << int(last_bt);
+            EXPECT_EQ(hsm_switch_apply(pos, last_bt).host, with_host.host) << "pos " << int(pos) << " last_bt " << int(last_bt);
         }
     }
 }
 
-/* With no cable the switch is the best available intent, so it is honoured
- * exactly as before -- the demotion must not cost the wireless affordance. */
-TEST_F(TransportLogic, without_a_cable_the_switch_still_decides) {
-    hsm_switch_apply_t bt = hsm_switch_apply_with_cable(HSM_SWITCH_BT, DEVS_BT4, false);
+/* Requirement 2, stated as the failing case it encodes against: switch on a
+ * wireless position, a cable present that provides power but no host (a dumb PSU;
+ * `host_confirmed == false`). The board must stay on the switch's wireless
+ * transport rather than going silent on USB. Pre-fix this produced USB for both
+ * wireless positions -- the measured defect. */
+TEST_F(TransportLogic, a_power_only_cable_does_not_force_usb) {
+    hsm_switch_apply_t bt = hsm_input_rule(HSM_SWITCH_BT, DEVS_BT4, false);
     EXPECT_EQ(HSM_SWITCH_SETTLED, bt.kind);
     EXPECT_EQ(DEVS_BT4, bt.devs);
     EXPECT_EQ(HSM_HOST_BLUETOOTH, bt.host);
 
-    hsm_switch_apply_t g24 = hsm_switch_apply_with_cable(HSM_SWITCH_2G4, DEVS_BT1, false);
+    hsm_switch_apply_t g24 = hsm_input_rule(HSM_SWITCH_2G4, DEVS_BT1, false);
     EXPECT_EQ(HSM_SWITCH_SETTLED, g24.kind);
     EXPECT_EQ(DEVS_2G4, g24.devs);
     EXPECT_EQ(HSM_HOST_2P4GHZ, g24.host);
+
+    /* And the switch is honoured even when a host HAS enumerated: a host on the
+     * other end of a charging cable is not a request to abandon the radio. */
+    hsm_switch_apply_t g24_host = hsm_input_rule(HSM_SWITCH_2G4, DEVS_BT1, true);
+    EXPECT_EQ(DEVS_2G4, g24_host.devs);
+    EXPECT_EQ(HSM_HOST_2P4GHZ, g24_host.host);
 }
 
-/* An unreadable switch with no cable degrades to the persisted intent instead of
- * applying nothing. The old rule returned UNREADABLE and left both selectors
- * untouched, which is what let a boot on the USB position self-detach (UNKNOWN
- * -> persisted BT -> "Bluetooth" -> line down). Now the fallback is explicit and
- * always a real transport, so "attached to a host but routed elsewhere" cannot
- * arise from an unreadable pin either. */
-TEST_F(TransportLogic, unreadable_switch_without_a_cable_falls_back_to_the_persisted_index) {
+/* An unreadable switch degrades to the persisted intent when no host is
+ * confirmed, instead of applying nothing. The old rule returned UNREADABLE and
+ * left both selectors untouched, which is what let a boot on the USB position
+ * self-detach (UNKNOWN -> persisted BT -> "Bluetooth" -> line down). Now the
+ * fallback is explicit and always a real transport, so "attached to a host but
+ * routed elsewhere" cannot arise from an unreadable pin either. */
+TEST_F(TransportLogic, unreadable_switch_falls_back_to_the_persisted_index) {
     for (uint8_t bt = DEVS_BT1; bt <= DEVS_BT5; bt++) {
-        hsm_switch_apply_t r = hsm_switch_apply_with_cable(HSM_SWITCH_UNKNOWN, bt, false);
+        hsm_switch_apply_t r = hsm_input_rule(HSM_SWITCH_UNKNOWN, bt, false);
         EXPECT_EQ(HSM_SWITCH_SETTLED, r.kind) << "bt " << int(bt);
         EXPECT_EQ(bt, r.devs) << "bt " << int(bt);
         EXPECT_EQ(HSM_HOST_BLUETOOTH, r.host) << "bt " << int(bt);
@@ -308,55 +322,24 @@ TEST_F(TransportLogic, unreadable_switch_without_a_cable_falls_back_to_the_persi
 
     /* A persisted index that is not a BT profile clamps to USB rather than
      * fabricating a profile. */
-    hsm_switch_apply_t clamp = hsm_switch_apply_with_cable(HSM_SWITCH_UNKNOWN, DEVS_2G4, false);
+    hsm_switch_apply_t clamp = hsm_input_rule(HSM_SWITCH_UNKNOWN, DEVS_2G4, false);
     EXPECT_EQ(HSM_SWITCH_SETTLED, clamp.kind);
     EXPECT_EQ(DEVS_USB, clamp.devs);
     EXPECT_EQ(HSM_HOST_USB, clamp.host);
 }
 
-/* A confirmed host outranks every hint. `usb_active` is the peripheral's own
- * enumeration result (`usb_connected_state()`), the one input that distinguishes
- * a real host from a dumb PSU -- so when it is true the transport is USB no
- * matter what the switch or the cable pin said. This is what keeps the magenta
- * failure fixed: a lying switch cannot override a host that has actually
- * enumerated. */
-TEST_F(TransportLogic, a_confirmed_host_outranks_every_hint) {
-    const hsm_switch_pos_t positions[]      = {HSM_SWITCH_UNKNOWN, HSM_SWITCH_USB, HSM_SWITCH_BT, HSM_SWITCH_2G4};
-    const uint8_t          last_bt_values[] = {DEVS_USB, DEVS_BT1, DEVS_BT3, DEVS_BT5, DEVS_2G4};
-    for (hsm_switch_pos_t pos : positions) {
-        for (uint8_t last_bt : last_bt_values) {
-            for (bool cable : {false, true}) {
-                hsm_switch_apply_t hint = hsm_switch_apply_with_cable(pos, last_bt, cable);
-                hsm_switch_apply_t r    = hsm_transport_decide(hint, true);
-                EXPECT_EQ(HSM_SWITCH_SETTLED, r.kind) << "pos " << int(pos);
-                EXPECT_EQ(DEVS_USB, r.devs) << "pos " << int(pos) << " last_bt " << int(last_bt);
-                EXPECT_EQ(HSM_HOST_USB, r.host) << "pos " << int(pos) << " last_bt " << int(last_bt);
-            }
-        }
+/* A confirmed host settles an UNREADABLE switch to USB -- and only that case. A
+ * boot-time pin read is the least trustworthy input, and there is always a host
+ * on the other end of a real cable, so an unreadable read with a host confirmed
+ * takes USB. A readable switch is never overridden (see the sweep above). */
+TEST_F(TransportLogic, a_confirmed_host_settles_an_unreadable_switch_to_usb) {
+    const uint8_t last_bt_values[] = {DEVS_USB, DEVS_BT1, DEVS_BT3, DEVS_BT5, DEVS_2G4};
+    for (uint8_t last_bt : last_bt_values) {
+        hsm_switch_apply_t r = hsm_input_rule(HSM_SWITCH_UNKNOWN, last_bt, true);
+        EXPECT_EQ(HSM_SWITCH_SETTLED, r.kind) << "last_bt " << int(last_bt);
+        EXPECT_EQ(DEVS_USB, r.devs) << "last_bt " << int(last_bt);
+        EXPECT_EQ(HSM_HOST_USB, r.host) << "last_bt " << int(last_bt);
     }
-}
-
-/* Without a confirmed host the hint stands unchanged -- including when the hint
- * is USB. This is the PSU case: a dumb supply raises `B9` and provides VBUS just
- * as a host does, so the hint may say USB, but with no enumeration the transport
- * must fall back to the switch's wireless choice rather than go silent. */
-TEST_F(TransportLogic, without_a_confirmed_host_the_hint_stands) {
-    /* The PSU: cable present (hint votes USB) but nothing enumerated. The
-     * decision must not manufacture a host that is not there -- it returns the
-     * hint as-is, and the caller's hint for "switch on BT, no host" is BT. */
-    hsm_switch_apply_t psu_hint = hsm_switch_apply_with_cable(HSM_SWITCH_BT, DEVS_BT2, false);
-    hsm_switch_apply_t psu      = hsm_transport_decide(psu_hint, false);
-    EXPECT_EQ(HSM_SWITCH_SETTLED, psu.kind);
-    EXPECT_EQ(DEVS_BT2, psu.devs);
-    EXPECT_EQ(HSM_HOST_BLUETOOTH, psu.host);
-
-    /* A cable hint that has NOT enumerated is returned unchanged: the decision
-     * adds no host, so the silent-USB outcome depends on the caller's hint, not
-     * on this stage. */
-    hsm_switch_apply_t cable_hint = hsm_switch_apply_with_cable(HSM_SWITCH_2G4, DEVS_BT1, true);
-    hsm_switch_apply_t cable      = hsm_transport_decide(cable_hint, false);
-    EXPECT_EQ(cable_hint.host, cable.host);
-    EXPECT_EQ(cable_hint.devs, cable.devs);
 }
 
 /* The regression guard for the boot self-detach (docs/FINDINGS.md, "the boot

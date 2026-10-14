@@ -36,7 +36,10 @@ static bool host_confirmed = false;
 static bool ready = false;
 
 static hsm_switch_apply_t hints(void) {
-    return hsm_switch_apply_with_cable(hs_mode_switch_pos(), last_btdev_from_confinfo(), wls_usb_cable_present());
+    /* The switch is the transport; the cable is only power (see `hsm_input_rule`
+     * -- a cable cannot express intent, so it is not passed here at all). A
+     * *confirmed* host upgrades an unreadable switch read to USB. */
+    return hsm_input_rule(hs_mode_switch_pos(), last_btdev_from_confinfo(), host_confirmed);
 }
 
 /* Commit `decision` and report whether it is a change. Applies both selectors on
@@ -77,9 +80,10 @@ bool wls_transport_decide(wls_transport_input_t input) {
     if (!hsm_transport_may_act(ready)) {
         return false;
     }
-    /* Inputs only. `host_confirmed` is the owner's own state, set by events,
-     * never a read of the driver the owner is about to restart. */
-    hsm_switch_apply_t decision = hsm_transport_decide(hints(), host_confirmed);
+    /* Inputs only. `hints()` already folds in `host_confirmed` (the owner's own
+     * event record, never a read of the driver the owner is about to restart),
+     * so the input rule IS the decision -- there is no second stage to compose. */
+    hsm_switch_apply_t decision = hints();
     if (!commit(decision)) {
         return false;
     }
