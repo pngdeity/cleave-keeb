@@ -403,13 +403,25 @@ bool lpwr_stop_is_allowed(void) {
      * interpreted — the board's lpwr_stop_hook_post() is gated on the same flag,
      * and a wake code of LPWR_WAKEUP_UART returns the machine to LPWR_STOP
      * without ever running lpwr_wakeup_cb(). The half then re-enters STOP with
-     * no rail re-raise and no matrix re-init: dark and unresponsive (observed on
-     * Bluetooth, where the master is not USB-exempt). Refuse any unordered stop.
+     * no rail re-raise and no matrix re-init: dark and unresponsive.
+     *
+     * DEMONSTRATED ON HARDWARE 2026-10-14 (no longer only predicted): with the
+     * switch on Bluetooth and no host bonded, the module reports
+     * `md state = 3 (DISCONNECTED)`, `hsm_link_watch()` maps that to
+     * HSM_LINK_ACT_SLEEP -> `lpwr_set_timeout_manual(true)` (see below), and the
+     * master — which is NOT USB-exempt on BT — stopped. `lpwr_stop_hook_pre()`
+     * had already lowered the LED rail, so BOTH halves went dark (the right half
+     * has no battery and is powered only by the master; see docs/HARDWARE.md
+     * "The wireless STOP extinguishes both halves"). Flipping the switch to USB
+     * restored the transport but NOT the rail; only a replug recovers it (and the
+     * replug did restore the LEDs on BOTH halves — confirmed 2026-10-14).
      *
      * This is a policy, not a statement that no wake source is armed — on both
      * paths the master arms its own rows, the mode-switch pins and the cable
      * pin. What this flag actually gates is the cross-half column drive, the
-     * module-sleep command, and the post-stop wake interpretation. */
+     * module-sleep command, and the post-stop wake interpretation.
+     *
+     * Refuse any unordered stop. */
     return lpwr_stop_is_allowed_decide(is_keyboard_master(), wls_sleep_ordered());
 }
 
