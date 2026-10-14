@@ -17,7 +17,8 @@
 # Keep this file, even if it is empty, as a marker that this folder contains tests
 # --------------------------------------------------------------------------------
 
-# The boot-blink sequencer is hardware-free by construction, so it is added
-# directly.
+# The journal encoder is hardware-free by construction (no include beyond
+# stdint.h), so it is added directly. The `.ram0` storage and stamping live in
+# the shell (`wls_jump_journal.c`) and are not built here.
 SRC += \
-	$(TOP_DIR)/keyboards/epomaker/epomaker_split65/wls/boot_blink_logic.c
+	$(TOP_DIR)/keyboards/epomaker/epomaker_split65/wls/jump_journal_logic.c

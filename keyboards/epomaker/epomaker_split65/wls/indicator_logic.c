@@ -55,3 +55,41 @@ wls_bat_colour_t wls_bat_colour_of(bool charging, bool full, uint8_t level) {
     }
     return WLS_BAT_RED;
 }
+
+wls_bat_rgb_t wls_bat_rgb_of(wls_bat_colour_t colour) {
+    /* Moved here from the indicator shell (the FC/IS audit, F3): the shell held
+     * this five-arm switch, which is a policy decision, not an effect. Values
+     * are the ones the board painted before -- unchanged, so the visible
+     * behaviour is identical. */
+    switch (colour) {
+        case WLS_BAT_GREEN:
+            return (wls_bat_rgb_t){0x00, 0xFF, 0x00};
+        case WLS_BAT_BLUE:
+            return (wls_bat_rgb_t){0x00, 0x40, 0xFF};
+        case WLS_BAT_ORANGE:
+            return (wls_bat_rgb_t){0xFF, 0x80, 0x00};
+        case WLS_BAT_RED:
+            return (wls_bat_rgb_t){0xFF, 0x00, 0x00};
+        case WLS_BAT_NONE:
+        default:
+            return (wls_bat_rgb_t){0x00, 0x00, 0x00};
+    }
+}
+
+wls_bat_action_t wls_bat_action_of(bool charging, bool full, uint8_t level, bool request, uint8_t low) {
+    /* Order mirrors the shell branch this replaced exactly (F10): full-charge
+     * request first, then charging, then the low-level warning, then nothing.
+     * Only the two charging cases gate on `request`; the low-level blink does
+     * not, which is why `request` is ignored on the blink path -- the same
+     * asymmetry the board had. */
+    if (charging && full) {
+        return request ? WLS_BAT_ACT_PAINT_RED : WLS_BAT_ACT_NONE;
+    }
+    if (charging) {
+        return request ? WLS_BAT_ACT_PAINT_GREEN : WLS_BAT_ACT_NONE;
+    }
+    if (level <= low) {
+        return WLS_BAT_ACT_BLINK_RED;
+    }
+    return WLS_BAT_ACT_NONE;
+}

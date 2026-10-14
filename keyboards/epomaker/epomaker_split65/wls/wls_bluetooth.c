@@ -4,6 +4,7 @@
 #include "bluetooth.h"
 #include "wls.h"
 #include "transport_logic.h"
+#include "wls/wls_module.h"
 
 /* Upstream's `custom` Bluetooth driver contract (drivers/bluetooth/bluetooth.h).
  * This board's Bluetooth is a third-party UART module driven over the vendor
@@ -54,11 +55,11 @@ void bluetooth_select_profile(uint8_t profile, bool reset) {
      * `reset` preserves the vendor distinction: false = select the profile,
      * true = re-pair it (CLEAN + devinfo + PAIR on the module). A short keycode
      * tap selects; a long press re-pairs. */
-    wireless_devs_change(wireless_get_current_devs(), profile, reset);
+    wls_module_devs_change(wls_module_devs(), profile, reset);
 }
 
 uint8_t bluetooth_get_profile(void) {
-    return hsm_profile_of_devs(wireless_get_current_devs());
+    return hsm_profile_of_devs(wls_module_devs());
 }
 
 static bool wls_bt_link_up(void) {
@@ -71,7 +72,7 @@ static bool wls_bt_link_up(void) {
  * BT profile so a stray send cannot reset USB or 2.4 GHz state. */
 static void wls_bt_poke_if_down(void) {
     if (wls_on_bt_profile() && *md_getp_state() != MD_STATE_CONNECTED) {
-        wireless_devs_change(wireless_get_current_devs(), wireless_get_current_devs(), false);
+        wls_module_devs_change(wls_module_devs(), wls_module_devs(), false);
     }
 }
 

@@ -38,21 +38,20 @@
 /*===========================================================================*/
 
 static void wb32_gpio_init(void) {
-
 #if WB32_HAS_GPIOA
-  rccEnableAPB1(RCC_APB1ENR_GPIOAEN);
+    rccEnableAPB1(RCC_APB1ENR_GPIOAEN);
 #endif
 
 #if WB32_HAS_GPIOB
-  rccEnableAPB1(RCC_APB1ENR_GPIOBEN);
+    rccEnableAPB1(RCC_APB1ENR_GPIOBEN);
 #endif
 
 #if WB32_HAS_GPIOC
-  rccEnableAPB1(RCC_APB1ENR_GPIOCEN);
+    rccEnableAPB1(RCC_APB1ENR_GPIOCEN);
 #endif
 
 #if WB32_HAS_GPIOD
-  rccEnableAPB1(RCC_APB1ENR_GPIODEN);
+    rccEnableAPB1(RCC_APB1ENR_GPIODEN);
 #endif
 }
 
@@ -69,15 +68,35 @@ static void wb32_gpio_init(void) {
  * any other initialization.
  */
 void __early_init(void) {
-
-  wb32_clock_init();
-  wb32_gpio_init();
+    wb32_clock_init();
+    wb32_gpio_init();
 }
 
 /**
  * @brief   Board-specific initialization code.
  * @note    You can add your board-specific code here.
  */
-void boardInit(void) {
+void boardInit(void) {}
 
+/*
+ * The WB32 USB peripheral must not be torn down and restarted.
+ *
+ * This override restores upstream's own board-level fix, which was added in
+ * `b5a52b4cff` ("Prevent USB peripheral fault when restarting USB on WB32 MCUs
+ * (#18058)") and removed again in `bd2e59af60` ("Fixed WB32 MCU remote wakeup
+ * issue (#20863)"). Neither commit's intent is our concern here; what matters is
+ * that the removal left the *weak* default in `tmk_core/protocol/chibios/usb_main.c`
+ * linked for this board, and that default is
+ * `usbDisconnectBus` -> `usbStop` -> endpoint stops -> `wait_ms(50)` -> endpoint
+ * restarts -> `usbStart`/`usbConnectBus` -- exactly the sequence the added commit
+ * said "breaks it" on WB32.
+ *
+ * This is not a workaround we invented: it is upstream's own text, put back, and
+ * it is the discriminator for whether the intermittent USB faults seen on this
+ * board are this erratum. See `docs/HARDWARE.md`, "The USB restart erratum", for
+ * the `nm`/`objdump` evidence that the weak default was being linked and for the
+ * status boundary (present, not yet established as the cause).
+ */
+void restart_usb_driver(USBDriver *usbp) {
+    (void)usbp;
 }

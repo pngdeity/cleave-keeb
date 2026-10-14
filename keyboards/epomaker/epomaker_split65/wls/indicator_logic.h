@@ -65,3 +65,38 @@ typedef enum {
 
 /* `charging`/`full` come from the charge pins; `level` is 0..100. */
 wls_bat_colour_t wls_bat_colour_of(bool charging, bool full, uint8_t level);
+
+/* The RGB a battery colour is painted with, as plain components.
+ *
+ * The colour→RGB map is *policy* (which bytes mean "green"), so it belongs with
+ * the colour vocabulary in the core, not in the shell: previously the shell held
+ * a five-arm switch re-deriving these bytes from the enum, which is exactly the
+ * "shell holds no policy" violation this file exists to remove. The shell now
+ * paints `r`/`g`/`b` through unchanged. `WLS_BAT_NONE` maps to all-zero (paint
+ * black), which is the same as painting nothing on this rail. */
+typedef struct {
+    uint8_t r, g, b;
+} wls_bat_rgb_t;
+
+wls_bat_rgb_t wls_bat_rgb_of(wls_bat_colour_t colour);
+
+/* What the charging LED should *do* this tick, given the charge state and
+ * level. This is a decision, so by V3/V4 it belongs in the core: the shell
+ * previously held a four-arm branch (paint red / paint green / blink red /
+ * nothing) re-deriving it inline, which is the "shell holds no policy" shape.
+ * The shell now applies the returned action and holds no branch. Pure.
+ *
+ * The three red/green paint cases come from the charge pins; `blink` is the
+ * low-level warning, which is the same blink the sleep order rides on but its
+ * own visible effect. */
+typedef enum {
+    WLS_BAT_ACT_NONE = 0,    /* leave the charging LED alone */
+    WLS_BAT_ACT_PAINT_RED,   /* full-request: solid red */
+    WLS_BAT_ACT_PAINT_GREEN, /* charge-request: solid green */
+    WLS_BAT_ACT_BLINK_RED,   /* low level: blink red (the warning) */
+} wls_bat_action_t;
+
+/* `charging`/`full` are the charge pins, `level` is 0..100, `request` is the
+ * host's/IM's charge-request flag, and `low` is the level at or below which the
+ * warning blink applies. Returns the action the shell should apply. Pure. */
+wls_bat_action_t wls_bat_action_of(bool charging, bool full, uint8_t level, bool request, uint8_t low);

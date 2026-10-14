@@ -7,6 +7,7 @@
 #include "wls/wls_eeprom.h"
 #include "wls/keymap_logic.h"
 #include "wls/transport_logic.h"
+#include "wls/wls_module.h"
 #include "wls/rgb_key_logic.h"
 #include "wls/wls_indicator.h"
 #include "rgb_record/rgb_record.h"
@@ -121,7 +122,7 @@ uint32_t wls_keymap_long_press(uint32_t trigger_time, void *cb_arg) {
         }
     } else if (devs == DEVS_2G4) {
         if (hs_keycode_allowed(devs, confinfo.last_btdevs)) {
-            wireless_devs_change(wireless_get_current_devs(), DEVS_2G4, true);
+            wls_module_devs_change(wls_module_devs(), DEVS_2G4, true);
             wls_indicate_devs(DEVS_2G4, true);
         }
     }

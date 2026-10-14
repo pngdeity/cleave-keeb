@@ -17,7 +17,7 @@
 # Keep this file, even if it is empty, as a marker that this folder contains tests
 # --------------------------------------------------------------------------------
 
-# The boot-report codec and blink schedule are hardware-free by construction, so
-# they are added directly.
+# The boot-code codec and sequencer are hardware-free by construction, so they
+# are added directly.
 SRC += \
-	$(TOP_DIR)/keyboards/epomaker/epomaker_split65/wls/boot_report_logic.c
+	$(TOP_DIR)/keyboards/epomaker/epomaker_split65/wls/boot_code_logic.c

@@ -212,6 +212,32 @@ TEST_F(TransportLogic, link_watch_clears_foreign_deadlines) {
     EXPECT_EQ(0u, t.sleep_at);
 }
 
+/* Activity restarts only the active countdown, and returns the deadlines to
+ * store back (rather than writing through a caller pointer) so a caller cannot
+ * forget to persist them. */
+TEST_F(TransportLogic, link_restart_returns_active_deadline_only) {
+    const uint32_t RECONNECT = 30000, SLEEP = 60000;
+
+    /* DISCONNECTED: only the reconnect deadline is armed. */
+    hsm_link_timers_t d = hsm_link_restart(HSM_LINK_DISCONNECTED, 1000, RECONNECT, SLEEP);
+    EXPECT_EQ(31000u, d.reconnect_at);
+    EXPECT_EQ(0u, d.sleep_at);
+
+    /* CONNECTED: only the sleep deadline is armed. */
+    hsm_link_timers_t c = hsm_link_restart(HSM_LINK_CONNECTED, 1000, RECONNECT, SLEEP);
+    EXPECT_EQ(0u, c.reconnect_at);
+    EXPECT_EQ(61000u, c.sleep_at);
+
+    /* Neither countdown applies to a state that is not one of the two. */
+    hsm_link_timers_t n = hsm_link_restart(HSM_LINK_NONE, 1000, RECONNECT, SLEEP);
+    EXPECT_EQ(0u, n.reconnect_at);
+    EXPECT_EQ(0u, n.sleep_at);
+
+    hsm_link_timers_t r = hsm_link_restart(HSM_LINK_PAIRING, 1000, RECONNECT, SLEEP);
+    EXPECT_EQ(0u, r.reconnect_at);
+    EXPECT_EQ(0u, r.sleep_at);
+}
+
 /* The low-battery sleep order is a pure function of the battery facts: order a
  * stop only at/below the stop threshold while not charging. This pins the
  * decision the board's battery tick makes before it calls `wls_order_sleep`. */
@@ -253,6 +279,108 @@ TEST_F(TransportLogic, switch_position_yields_a_matched_devs_and_host_pair) {
     EXPECT_EQ(HSM_SWITCH_SETTLED, bt.kind);
     EXPECT_EQ(DEVS_BT2, bt.devs);
     EXPECT_EQ(HSM_HOST_BLUETOOTH, bt.host);
+}
+
+/* The switch is one INPUT among several, not the sole authority.
+ *
+ * A host cable is a physical fact and outranks a switch preference: for EVERY
+ * switch position and every persisted sub-index, a settled cable read must land
+ * on USB. This is the invariant that makes the observed failure -- a settled
+ * wireless read with a cable present, sending HID to the module while the host
+ * hears nothing ("enumerated, lit, silent") -- unrepresentable rather than
+ * merely unlikely. */
+TEST_F(TransportLogic, cable_outranks_the_switch_for_every_input) {
+    const hsm_switch_pos_t positions[]      = {HSM_SWITCH_UNKNOWN, HSM_SWITCH_USB, HSM_SWITCH_BT, HSM_SWITCH_2G4};
+    const uint8_t          last_bt_values[] = {DEVS_USB, DEVS_BT1, DEVS_BT3, DEVS_BT5, DEVS_2G4};
+    for (hsm_switch_pos_t pos : positions) {
+        for (uint8_t last_bt : last_bt_values) {
+            hsm_switch_apply_t r = hsm_switch_apply_with_cable(pos, last_bt, true);
+            EXPECT_EQ(HSM_SWITCH_SETTLED, r.kind) << "pos " << int(pos);
+            EXPECT_EQ(DEVS_USB, r.devs) << "pos " << int(pos) << " last_bt " << int(last_bt);
+            EXPECT_EQ(HSM_HOST_USB, r.host) << "pos " << int(pos) << " last_bt " << int(last_bt);
+        }
+    }
+}
+
+/* With no cable the switch is the best available intent, so it is honoured
+ * exactly as before -- the demotion must not cost the wireless affordance. */
+TEST_F(TransportLogic, without_a_cable_the_switch_still_decides) {
+    hsm_switch_apply_t bt = hsm_switch_apply_with_cable(HSM_SWITCH_BT, DEVS_BT4, false);
+    EXPECT_EQ(HSM_SWITCH_SETTLED, bt.kind);
+    EXPECT_EQ(DEVS_BT4, bt.devs);
+    EXPECT_EQ(HSM_HOST_BLUETOOTH, bt.host);
+
+    hsm_switch_apply_t g24 = hsm_switch_apply_with_cable(HSM_SWITCH_2G4, DEVS_BT1, false);
+    EXPECT_EQ(HSM_SWITCH_SETTLED, g24.kind);
+    EXPECT_EQ(DEVS_2G4, g24.devs);
+    EXPECT_EQ(HSM_HOST_2P4GHZ, g24.host);
+}
+
+/* An unreadable switch with no cable degrades to the persisted intent instead of
+ * applying nothing. The old rule returned UNREADABLE and left both selectors
+ * untouched, which is what let a boot on the USB position self-detach (UNKNOWN
+ * -> persisted BT -> "Bluetooth" -> line down). Now the fallback is explicit and
+ * always a real transport, so "attached to a host but routed elsewhere" cannot
+ * arise from an unreadable pin either. */
+TEST_F(TransportLogic, unreadable_switch_without_a_cable_falls_back_to_the_persisted_index) {
+    for (uint8_t bt = DEVS_BT1; bt <= DEVS_BT5; bt++) {
+        hsm_switch_apply_t r = hsm_switch_apply_with_cable(HSM_SWITCH_UNKNOWN, bt, false);
+        EXPECT_EQ(HSM_SWITCH_SETTLED, r.kind) << "bt " << int(bt);
+        EXPECT_EQ(bt, r.devs) << "bt " << int(bt);
+        EXPECT_EQ(HSM_HOST_BLUETOOTH, r.host) << "bt " << int(bt);
+    }
+
+    /* A persisted index that is not a BT profile clamps to USB rather than
+     * fabricating a profile. */
+    hsm_switch_apply_t clamp = hsm_switch_apply_with_cable(HSM_SWITCH_UNKNOWN, DEVS_2G4, false);
+    EXPECT_EQ(HSM_SWITCH_SETTLED, clamp.kind);
+    EXPECT_EQ(DEVS_USB, clamp.devs);
+    EXPECT_EQ(HSM_HOST_USB, clamp.host);
+}
+
+/* A confirmed host outranks every hint. `usb_active` is the peripheral's own
+ * enumeration result (`usb_connected_state()`), the one input that distinguishes
+ * a real host from a dumb PSU -- so when it is true the transport is USB no
+ * matter what the switch or the cable pin said. This is what keeps the magenta
+ * failure fixed: a lying switch cannot override a host that has actually
+ * enumerated. */
+TEST_F(TransportLogic, a_confirmed_host_outranks_every_hint) {
+    const hsm_switch_pos_t positions[]      = {HSM_SWITCH_UNKNOWN, HSM_SWITCH_USB, HSM_SWITCH_BT, HSM_SWITCH_2G4};
+    const uint8_t          last_bt_values[] = {DEVS_USB, DEVS_BT1, DEVS_BT3, DEVS_BT5, DEVS_2G4};
+    for (hsm_switch_pos_t pos : positions) {
+        for (uint8_t last_bt : last_bt_values) {
+            for (bool cable : {false, true}) {
+                hsm_switch_apply_t hint = hsm_switch_apply_with_cable(pos, last_bt, cable);
+                hsm_switch_apply_t r    = hsm_transport_decide(hint, true);
+                EXPECT_EQ(HSM_SWITCH_SETTLED, r.kind) << "pos " << int(pos);
+                EXPECT_EQ(DEVS_USB, r.devs) << "pos " << int(pos) << " last_bt " << int(last_bt);
+                EXPECT_EQ(HSM_HOST_USB, r.host) << "pos " << int(pos) << " last_bt " << int(last_bt);
+            }
+        }
+    }
+}
+
+/* Without a confirmed host the hint stands unchanged -- including when the hint
+ * is USB. This is the PSU case: a dumb supply raises `B9` and provides VBUS just
+ * as a host does, so the hint may say USB, but with no enumeration the transport
+ * must fall back to the switch's wireless choice rather than go silent. */
+TEST_F(TransportLogic, without_a_confirmed_host_the_hint_stands) {
+    /* The PSU: cable present (hint votes USB) but nothing enumerated. The
+     * decision must not manufacture a host that is not there -- it returns the
+     * hint as-is, and the caller's hint for "switch on BT, no host" is BT. */
+    hsm_switch_apply_t psu_hint = hsm_switch_apply_with_cable(HSM_SWITCH_BT, DEVS_BT2, false);
+    hsm_switch_apply_t psu      = hsm_transport_decide(psu_hint, false);
+    EXPECT_EQ(HSM_SWITCH_SETTLED, psu.kind);
+    EXPECT_EQ(DEVS_BT2, psu.devs);
+    EXPECT_EQ(HSM_HOST_BLUETOOTH, psu.host);
+
+    /* A cable hint that has NOT enumerated is returned unchanged: the decision
+     * adds no host, so the silent-USB outcome depends on the caller's hint, not
+     * on this stage. */
+    hsm_switch_apply_t cable_hint = hsm_switch_apply_with_cable(HSM_SWITCH_2G4, DEVS_BT1, true);
+    hsm_switch_apply_t cable      = hsm_transport_decide(cable_hint, false);
+    EXPECT_EQ(cable_hint.host, cable.host);
+    EXPECT_EQ(cable_hint.devs, cable.devs);
 }
 
 /* The regression guard for the boot self-detach (docs/FINDINGS.md, "the boot
@@ -307,6 +435,26 @@ TEST_F(TransportLogic, numeric_mode_maps_to_the_canonical_position) {
     EXPECT_EQ(HSM_SWITCH_UNKNOWN, hsm_switch_pos_of_mode(7));
 }
 
+/* The switch edge is a position change, not a disagreement with the resolved
+ * transport. Reading it as the latter is the livelock: under the transport rule
+ * the pins are *supposed* to disagree with the transport (a confirmed host
+ * outranks a lying switch), so that predicate never cleared and re-drove the
+ * actuator every 50 ms scan -- cutting the data line and re-enumerating. */
+TEST_F(TransportLogic, switch_edge_is_a_position_change_not_a_disagreement) {
+    EXPECT_FALSE(hsm_switch_moved(HSM_SWITCH_2G4, HSM_SWITCH_2G4, false));
+    EXPECT_TRUE(hsm_switch_moved(HSM_SWITCH_USB, HSM_SWITCH_2G4, false));
+    EXPECT_TRUE(hsm_switch_moved(HSM_SWITCH_2G4, HSM_SWITCH_USB, false));
+    EXPECT_TRUE(hsm_switch_moved(HSM_SWITCH_UNKNOWN, HSM_SWITCH_BT, false));
+    EXPECT_FALSE(hsm_switch_moved(HSM_SWITCH_UNKNOWN, HSM_SWITCH_UNKNOWN, false));
+}
+
+/* The detector's own "re-read now" request counts as an edge regardless of
+ * history, so a forced scan still runs the switch's side effects. */
+TEST_F(TransportLogic, a_forced_read_is_always_an_edge) {
+    EXPECT_TRUE(hsm_switch_moved(HSM_SWITCH_USB, HSM_SWITCH_USB, true));
+    EXPECT_TRUE(hsm_switch_moved(HSM_SWITCH_UNKNOWN, HSM_SWITCH_UNKNOWN, true));
+}
+
 /* The detector's *output* mode (wls.h `enum modeio_mode`: hs_none=0, hs_usb=1,
  * hs_bt=2, hs_2g4=3, hs_wireless=4) maps onto the canonical position. This is a
  * different numbering from the raw pin read above, so it has its own mapper;
@@ -335,4 +483,149 @@ TEST_F(TransportLogic, keycode_gate_permits_only_the_matching_position) {
     EXPECT_FALSE(hsm_keycode_allowed(HSM_SWITCH_2G4, DEVS_BT1));
     EXPECT_TRUE(hsm_keycode_allowed(HSM_SWITCH_UNKNOWN, DEVS_BT1));
     EXPECT_TRUE(hsm_keycode_allowed(HSM_SWITCH_UNKNOWN, DEVS_2G4));
+}
+
+/* The transport-change rule: the owner applies the transport, and drives the USB
+ * line, only when this says the decision differs from what is committed. It is
+ * the reason a self-re-arming trigger is impossible: re-running the decision on
+ * an unchanged input produces no change, so nothing acts, so nothing perturbs
+ * the input. Both livelocks this session were failures of exactly that property
+ * (see docs/ADR-transport-authority.md). */
+TEST_F(TransportLogic, a_repeated_decision_is_not_a_change) {
+    EXPECT_FALSE(hsm_transport_changed(HSM_HOST_USB, DEVS_USB, HSM_HOST_USB, DEVS_USB));
+    EXPECT_FALSE(hsm_transport_changed(HSM_HOST_2P4GHZ, DEVS_2G4, HSM_HOST_2P4GHZ, DEVS_2G4));
+}
+
+/* Either selector differing is a change -- the pair is the transport, and a host
+ * written without its matching device index routes HID to the wrong driver. */
+TEST_F(TransportLogic, either_selector_differing_is_a_change) {
+    EXPECT_TRUE(hsm_transport_changed(HSM_HOST_2P4GHZ, DEVS_USB, HSM_HOST_USB, DEVS_USB));
+    EXPECT_TRUE(hsm_transport_changed(HSM_HOST_USB, DEVS_2G4, HSM_HOST_USB, DEVS_USB));
+    EXPECT_TRUE(hsm_transport_changed(HSM_HOST_USB, DEVS_BT1, HSM_HOST_USB, DEVS_2G4));
+}
+
+/* The undecided start: the owner begins at WLS_TRANSPORT_UNKNOWN, so the first
+ * commit is always a change and therefore always writes both selectors. Without
+ * this the owner could silently agree with a `connection_init()` host it never
+ * chose (EEPROM may hold CONNECTION_HOST_AUTO, which is not a transport). */
+TEST_F(TransportLogic, the_first_decision_over_an_undecided_owner_is_a_change) {
+    EXPECT_TRUE(hsm_transport_changed(HSM_HOST_USB, DEVS_USB, WLS_TRANSPORT_UNKNOWN, DEVS_USB));
+    EXPECT_TRUE(hsm_transport_changed(HSM_HOST_BLUETOOTH, DEVS_BT1, WLS_TRANSPORT_UNKNOWN, DEVS_USB));
+    EXPECT_TRUE(hsm_transport_changed(HSM_HOST_2P4GHZ, DEVS_2G4, WLS_TRANSPORT_UNKNOWN, DEVS_USB));
+}
+
+/* A host that is merely idle is still a host.
+ *
+ * Upstream's notification carries `usb_configure_state_t` (NO_INIT=0, INIT=1,
+ * CONFIGURED=2, SUSPEND=3). Reading SUSPEND as a host loss re-decides the
+ * transport on the switch hint and drops the data line the moment the host
+ * stops polling -- a self-detach at idle, and on a board whose switch reads
+ * wireless while cabled it is the very failure the transport owner removes. Only
+ * a reset / true unconfigure means the host is gone. */
+TEST_F(TransportLogic, a_suspended_host_is_still_present) {
+    enum { NO_INIT = 0, INIT = 1, CONFIGURED = 2, SUSPEND = 3 };
+    EXPECT_TRUE(hsm_host_present_on_notify(CONFIGURED));
+    EXPECT_TRUE(hsm_host_present_on_notify(SUSPEND));
+    EXPECT_FALSE(hsm_host_present_on_notify(NO_INIT));
+    EXPECT_FALSE(hsm_host_present_on_notify(INIT));
+    /* Any value upstream may add later must not be mistaken for a live host. */
+    EXPECT_FALSE(hsm_host_present_on_notify(99));
+}
+
+/* An owner that has not been told the module is up performs no effect.
+ *
+ * Committing the transport reaches the vendor ring buffer
+ * (`wireless_devs_change` -> `md_send_devctrl` -> `smsg_push`), which is only
+ * initialized by `wireless_init()`. The owner can be driven before that:
+ * `protocol_setup()` fires the USB-lifecycle hook, which feeds the owner, and
+ * the ring is not up yet -- `smsg_push` would `memcpy` to a NULL buffer and
+ * hard-fault the MCU. The 2026-10-13 build did exactly that and reset before the
+ * main loop, so the board pulled up D+ and went mute. */
+TEST_F(TransportLogic, an_unready_owner_may_not_act) {
+    EXPECT_FALSE(hsm_transport_may_act(false));
+    EXPECT_TRUE(hsm_transport_may_act(true));
+}
+
+/* The module's own gate, applied wherever `wireless_devs_change` is called. The
+ * transport owner's readiness and the module's readiness are the same event but
+ * different components: gating one actuator's call sites (the owner) is not
+ * gating the class, which is why every board call site goes through the module's
+ * own owner (`wls/wls_module.c`) and this predicate pins the rule. */
+TEST_F(TransportLogic, an_unready_module_may_not_act) {
+    EXPECT_FALSE(hsm_module_may_act(false));
+    EXPECT_TRUE(hsm_module_may_act(true));
+}
+
+/* An unconfirmed (boot-time) decision may only ever turn the USB line ON. If it
+ * could turn it OFF, it would destroy the enumeration that would confirm it: the
+ * line falls, USB never enumerates, and the host-lifecycle event that outranks a
+ * lying switch never fires. The 2026-10-13 build did exactly that -- the switch
+ * read 2.4 GHz (the C14/C15 bridge), boot committed to it, and the board cut the
+ * line it was about to enumerate on. The demotion belongs to confirmed events
+ * (the switch edge, the host event hook), not to boot. */
+TEST_F(TransportLogic, an_unconfirmed_decision_may_only_promote_the_line) {
+    EXPECT_TRUE(hsm_transport_may_drive_line(true));   /* USB decision -> turn on  */
+    EXPECT_FALSE(hsm_transport_may_drive_line(false)); /* wireless -> do NOT tear down */
+}
+
+/* --- the BT-index predicate, written once (F6) ------------------------------
+ *
+ * The range test "is this a BT device index" used to be spelled out at four call
+ * sites, each with its own fallback literal. The predicate now lives in one
+ * place; the fallback stays a per-site parameter, because the sites genuinely
+ * differ (BT1 where a BT device is required, USB where the switch said nothing,
+ * 0 where "no BT profile" is meant). These tests pin both halves. */
+
+TEST_F(TransportLogic, bt_index_predicate_has_closed_bounds) {
+    EXPECT_FALSE(hsm_devs_is_bt(DEVS_USB)); /* 0 -- below the range */
+    EXPECT_TRUE(hsm_devs_is_bt(DEVS_BT1));  /* 1 -- the low bound */
+    EXPECT_TRUE(hsm_devs_is_bt(DEVS_BT5));  /* 5 -- the high bound */
+    EXPECT_FALSE(hsm_devs_is_bt(DEVS_2G4)); /* 6 -- above the range */
+    EXPECT_FALSE(hsm_devs_is_bt(0xFF));     /* corrupt -- outside it */
+}
+
+TEST_F(TransportLogic, bt_or_fallback_passes_through_inside_the_range) {
+    for (uint8_t d = DEVS_BT1; d <= DEVS_BT5; d++) {
+        EXPECT_EQ(d, hsm_btdev_or(d, DEVS_USB));
+    }
+}
+
+TEST_F(TransportLogic, bt_or_fallback_uses_the_callers_fallback) {
+    EXPECT_EQ(DEVS_BT1, hsm_btdev_or(DEVS_USB, DEVS_BT1)); /* "a BT device is required" */
+    EXPECT_EQ(DEVS_USB, hsm_btdev_or(DEVS_2G4, DEVS_USB)); /* "the switch said nothing"  */
+    EXPECT_EQ(0, hsm_btdev_or(DEVS_2G4, 0));               /* "no BT profile"            */
+    EXPECT_EQ(DEVS_USB, hsm_btdev_or(0xFF, DEVS_USB));     /* corrupt -> same rule       */
+}
+
+/* The four former sites, re-asserted through the core rule so a fallback cannot
+ * drift unnoticed. */
+TEST_F(TransportLogic, the_four_call_sites_keep_their_fallbacks) {
+    EXPECT_EQ(DEVS_BT1, hsm_boot_devs(HSM_SWITCH_BT, DEVS_USB));      /* site 1: BT1  */
+    EXPECT_EQ(DEVS_USB, hsm_boot_devs(HSM_SWITCH_UNKNOWN, DEVS_2G4)); /* site 1: USB  */
+    EXPECT_EQ(0, hsm_profile_of_devs(DEVS_2G4));                      /* site 2: none */
+    EXPECT_EQ(DEVS_BT1, hsm_seed_btdev(DEVS_USB, DEVS_2G4));          /* site 3: BT1  */
+}
+
+/* The EEPROM recovery rule is the same predicate, now host-testable: a persisted
+ * `devs` inside the BT range wins, anything else yields the persisted fallback
+ * (which the shell reads from `confinfo.last_btdevs`). */
+TEST_F(TransportLogic, eeprom_bt_subindex_recovers_through_the_core_rule) {
+    EXPECT_EQ(DEVS_BT3, hsm_btdev_or(DEVS_BT3, DEVS_BT1)); /* a good value survives */
+    EXPECT_EQ(DEVS_BT4, hsm_btdev_or(DEVS_USB, DEVS_BT4)); /* corrupt -> fallback  */
+    EXPECT_EQ(DEVS_BT1, hsm_btdev_or(DEVS_2G4, DEVS_BT1));
+}
+
+/* --- the confinfo migration gate (F6) --- */
+
+TEST_F(TransportLogic, confinfo_redefaults_on_a_blank_block) {
+    EXPECT_TRUE(hsm_confinfo_needs_default(0, 0, 1));
+}
+
+TEST_F(TransportLogic, confinfo_redefaults_on_a_version_change) {
+    EXPECT_TRUE(hsm_confinfo_needs_default(0x1234, 0, 1)); /* older layout */
+    EXPECT_TRUE(hsm_confinfo_needs_default(0x1234, 2, 1)); /* newer layout */
+}
+
+TEST_F(TransportLogic, confinfo_survives_a_matching_version) {
+    EXPECT_FALSE(hsm_confinfo_needs_default(0x1234, 1, 1));
 }

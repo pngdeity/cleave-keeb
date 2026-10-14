@@ -4,6 +4,7 @@
 #include QMK_KEYBOARD_H
 #include "wls/wls.h"
 #include "wls/transport_logic.h"
+#include "wls/wls_transport.h"
 #include "wls/keymap_logic.h"
 #include "wls/wls_eeprom.h"
 #include "wls/wls_usb.h"
@@ -38,6 +39,14 @@ void keyboard_post_init_kb(void) {
     /* Diagnostic boot counter: one increment per MCU boot, so a host reader can
      * tell a firmware reset loop from a mere USB-line drop (see `wls_diag`). */
     wls_note_boot();
+
+    /* Consume the MCU's latched reset cause, once, right after the boot counter
+     * and before anything else can clear it. The chip names why it last reset
+     * (power-on / software / watchdog / pin / ...); reading it here turns a
+     * reset loop from "the count climbs" into "the count climbs and the cause is
+     * X". Must precede `eeconfig_confinfo_init()` and `wls_lifecycle_boot()`,
+     * which is where the LED code is first derived from these facts. */
+    wls_note_reset_cause();
 
     eeconfig_confinfo_init();
 #ifdef RGBLIGHT_ENABLE
@@ -124,6 +133,14 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
 }
 
 bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
+    /* Any key dismisses the boot diagnostic code, whether or not the keymap
+     * consumes the record -- the code's job is done the moment the operator is
+     * using the board. Idempotent, so it costs nothing once the code has
+     * finished on its own. */
+    if (record->event.pressed) {
+        wls_indicator_boot_code_dismiss();
+    }
+
     /* `process_record_user` first (the QMK-mandated delegation); then the board's
      * own keycode concern, which decides and applies everything else. */
     if (process_record_user(keycode, record) != true) {
@@ -163,21 +180,45 @@ void housekeeping_task_user(void) { // loop
 #ifdef RGB_MATRIX_ENABLE
 
 /* Upstream's connection subsystem resolves the active host; the board's job
- * here is the physical side of a host change — the USB data-line connect and
- * disconnect — not a driver swap (item 14d). `host_get_active_driver()` picks
+ * here is the physical side of a host change -- the USB data-line connect and
+ * disconnect -- not a driver swap (item 14d). `host_get_active_driver()` picks
  * the driver from the host, so there is no `host_set_driver()` glue left.
  *
- * This hook does not touch `wireless_devs_change()`: that would re-enter
- * `handle_host_changed()`, and the vendor device index is already kept in
- * lockstep by the callers (the boot switch read and the keycode path).
- *
- * The predicate is the RESOLVED host (`connection_get_host()`), not the raw
- * argument: `handle_host_changed()` forwards `config.desired_host`, which can
- * be CONNECTION_HOST_AUTO. Testing the raw value would tear the USB data line
- * down whenever the host is AUTO, even when AUTO currently resolves to USB. */
+ * This hook NO LONGER drives the USB line. It used to re-derive intent from the
+ * live resolved host (`wls_usb_connect(connection_get_host() == USB)`), which
+ * made the physical line follow an *observation* instead of an *intent*: every
+ * oscillation of that observation became a physical teardown, and because the
+ * teardown cleared the very signal the transport decision consumed, the board
+ * livelocked at the enumeration cadence. The line is now driven only by the
+ * transport owner, and only when the committed transport actually changes -- see
+ * `wls/wls_transport.c` and `docs/ADR-transport-authority.md`. */
 void connection_host_changed_kb(connection_host_t host) {
     (void)host;
-    wls_usb_connect(connection_get_host() == CONNECTION_HOST_USB);
+}
+
+/* The USB lifecycle, as an EVENT rather than a polled signal.
+ *
+ * This is upstream's own notification (fired from
+ * `usb_device_state_set_configuration()`/`set_reset()`/`set_suspend()` via
+ * `notify_usb_device_state_change()`), so it arrives from the USB stack rather
+ * than from a loop that samples a value our own actions perturb -- which is the
+ * distinction that removes the livelock. `CONFIGURED` means the host enumerated
+ * and is talking to us, which a dumb PSU never does; feeding it to the owner
+ * lets the confirmed host outrank the switch, and lets a lost host fall back to
+ * the switch's intent.
+ *
+ * SUSPEND is deliberately NOT a host loss. It is a host *idle* signal -- the
+ * very condition QMK handles with remote wakeup -- so treating it as "the host
+ * went away" would re-decide the transport on the switch hint and tear the data
+ * line down the moment the host stopped polling. On a board whose switch reads
+ * wireless while the cable is attached, that is a self-detach: the failure the
+ * transport owner exists to remove, reintroduced at idle. Only a reset or a
+ * true unconfigure (NO_INIT/INIT) means the host is gone. */
+void notify_usb_device_state_change_kb(struct usb_device_state usb_device_state) {
+    wls_host_event_t event = hsm_host_present_on_notify((int)usb_device_state.configure_state) ? WLS_HOST_EVENT_CONFIGURED : WLS_HOST_EVENT_UNCONFIGURED;
+    /* The owner commits and drives the USB line itself. A host-lifecycle event
+     * is confirmed, so it owns the demotion. */
+    wls_transport_host_event(event);
 }
 
 #endif
@@ -209,12 +250,24 @@ bool rgb_matrix_indicators_advanced_kb(uint8_t led_min, uint8_t led_max) {
 #endif
 
 #ifdef WIRELESS_ENABLE
-    wls_indicator_channel_flash();
+    /* The boot diagnostic code OWNS the matrix while it plays: it is the one
+     * indicator that must be readable with the USB line down, so nothing else
+     * may overwrite it. Painting it first and suppressing the rest is the
+     * arbitration -- the previous instrument painted additively and was
+     * overwritten by the set-flash pass below.
+     *
+     * It is STARTED here, not at boot (step 33 of `keyboard_init()`), because
+     * this is the first point the RGB frame pass is live: arming it earlier let
+     * the schedule advance before it could be painted, and a boot that died
+     * before the loop ran had "shown" nothing. `wls_indicator_boot_code_start()`
+     * is idempotent, so calling it on the first paint arms exactly once. */
+    wls_indicator_boot_code_start();
+    wls_indicator_boot_code();
+    if (wls_indicator_boot_code_owns_matrix()) {
+        return true;
+    }
 
-    /* The boot-report readout: only paints while its sequence runs (a few
-     * seconds after boot), so it is additive and cannot disturb the passes
-     * below. It is the only indicator that works with the USB line down. */
-    wls_indicator_boot_report();
+    wls_indicator_channel_flash();
 
     /* While suppressed (post-reset) the battery indicator is hidden; the
      * suppression is a deadline, so it simply expires — no re-arm, no flag to

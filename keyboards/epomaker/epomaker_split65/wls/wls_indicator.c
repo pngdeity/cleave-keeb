@@ -8,8 +8,7 @@
 #include "wls/indicator_logic.h"
 #include "wls/sleep_order_logic.h"
 #include "wls/transport_logic.h"
-#include "wls/boot_blink_logic.h"
-#include "wls/boot_report_logic.h"
+#include "wls/boot_code_logic.h"
 #include "quantum.h"
 
 #ifdef WIRELESS_ENABLE
@@ -145,44 +144,38 @@ void wls_indicator_battery(void) {
      * full channel intensity so the charge state is legible at a glance rather
      * than a single dim LED. */
     if (rgb_matrix_get_val() != 0) {
-        uint8_t r = 0x00, g = 0x00, b = 0x00;
-        switch (wls_bat_colour_of(charging_state, bat_full_flag, bat_level)) {
-            case WLS_BAT_GREEN:
-                g = 0xFF;
-                break;
-            case WLS_BAT_BLUE:
-                g = 0x40;
-                b = 0xFF;
-                break;
-            case WLS_BAT_ORANGE:
-                r = 0xFF;
-                g = 0x80;
-                break;
-            case WLS_BAT_RED:
-                r = 0xFF;
-                break;
-            case WLS_BAT_NONE:
-            default:
-                break;
-        }
-        rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX, r, g, b);
-        rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX2, r, g, b);
+        wls_bat_rgb_t rgb = wls_bat_rgb_of(wls_bat_colour_of(charging_state, bat_full_flag, bat_level));
+        rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX, rgb.r, rgb.g, rgb.b);
+        rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX2, rgb.r, rgb.g, rgb.b);
     }
 
-    if (charging_state && (bat_full_flag)) {
-        (void)wls_sleep_order_tick(&sleep_order, false, timer_read32());
-        if (im_bat_req_charging_flag) rgb_matrix_set_color(HS_MATRIX_BLINK_INDEX_BAT, 0xFF, 0x00, 0x00);
-    } else if (charging_state) {
-        (void)wls_sleep_order_tick(&sleep_order, false, timer_read32());
-        if (im_bat_req_charging_flag) rgb_matrix_set_color(HS_MATRIX_BLINK_INDEX_BAT, 0x00, 0xFF, 0x00);
-    } else if (bat_level <= BATTERY_CAPACITY_LOW) {
-        rgb_matrix_hs_bat_set(HS_MATRIX_BLINK_INDEX_BAT, (RGB){0xFF, 0x00, 0x00}, 250, 1);
+    /* The *what to do* is the pure `wls_bat_action_of()`; this is only the
+     * effect. The sleep order below is the one thing that is not the action's
+     * concern: the low-level warning rides on the same sight as the sleep
+     * arming, so the tick runs whatever the action says. */
+    bool             critical = bat_level <= BATTERY_CAPACITY_STOP;
+    wls_bat_action_t action   = wls_bat_action_of(charging_state, bat_full_flag, bat_level, im_bat_req_charging_flag, BATTERY_CAPACITY_LOW);
 
-        /* The timing (arm on first critical sight, fire once the window
-         * elapses) is the pure `wls_sleep_order_tick()`; the *whether* is the
-         * pure `hsm_should_order_sleep()`. This is only the shell. */
-        bool critical = bat_level <= BATTERY_CAPACITY_STOP;
-        if (wls_sleep_order_tick(&sleep_order, critical, timer_read32()) == WLS_SLEEP_ORDER_NOW) {
+    switch (action) {
+        case WLS_BAT_ACT_PAINT_RED:
+            rgb_matrix_set_color(HS_MATRIX_BLINK_INDEX_BAT, 0xFF, 0x00, 0x00);
+            break;
+        case WLS_BAT_ACT_PAINT_GREEN:
+            rgb_matrix_set_color(HS_MATRIX_BLINK_INDEX_BAT, 0x00, 0xFF, 0x00);
+            break;
+        case WLS_BAT_ACT_BLINK_RED:
+            rgb_matrix_hs_bat_set(HS_MATRIX_BLINK_INDEX_BAT, (RGB){0xFF, 0x00, 0x00}, 250, 1);
+            break;
+        case WLS_BAT_ACT_NONE:
+        default:
+            break;
+    }
+
+    /* The timing (arm on first critical sight, fire once the window elapses) is
+     * the pure `wls_sleep_order_tick()`; the *whether* is the pure
+     * `hsm_should_order_sleep()`. */
+    if (critical) {
+        if (wls_sleep_order_tick(&sleep_order, true, timer_read32()) == WLS_SLEEP_ORDER_NOW) {
             if (hsm_should_order_sleep(bat_level, charging_state, BATTERY_CAPACITY_STOP)) {
                 wls_order_sleep(true);
                 lpwr_set_timeout_manual(true);
@@ -331,39 +324,87 @@ void wls_bat_suppress_arm(void) {
     bat_suppress_until = timer_read32() + WLS_BAT_SUPPRESS_MS;
 }
 
-/* The boot-report blink: the retained boot decision (Measure D), shown in
- * sequence over the whole matrix. This is the second exporter the derivation
- * called for -- it reads out when the USB line is down, which is exactly when
- * the `0xA4` reply that carries the same record cannot be read. The step
- * schedule is the pure `wls_boot_report_blink_step()`; the sequencer that paces
- * it is the pure `wls_boot_blink_logic`; this pass only paints. */
-static wls_boot_blink_t boot_blink = WLS_BOOT_BLINK_IDLE;
-static uint8_t          boot_blink_steps[WLS_BOOT_REPORT_BLINK_STEPS];
-static RGB              boot_blink_colours[WLS_BOOT_REPORT_BLINK_STEPS];
+/* The boot diagnostic code: the two-group `(amber, white)` count, played over
+ * the whole matrix. This is the exporter that reads out when the USB line is
+ * down -- exactly when the `0xA4` reply that carries the same record cannot be
+ * read. The codec and the sequencer are the pure `wls/boot_code_logic`; this
+ * pass only paints, and it *owns* the matrix while it plays.
+ *
+ * Ownership is the fix for the previous instrument's fatal defect: it painted
+ * additively and `wls_indicator_set_flash()` (below) repainted the whole matrix
+ * on any index-0xFF flash, so the frames the eye saw depended on unrelated
+ * state. Here the code is the highest-priority owner -- while it plays, nothing
+ * else paints. */
+static bool                   boot_code_active  = false;
+static uint32_t               boot_code_started = 0;
+static bool                   boot_code_done    = false;
+static wls_boot_code_counts_t boot_code_counts;
 
-/* Build the schedule from the retained decision and start the sequence. Called
- * once, at boot, after the decision has been recorded. */
-void wls_indicator_boot_report_start(void) {
-    wls_boot_report_t report = wls_boot_decision();
-    for (uint8_t i = 0; i < WLS_BOOT_REPORT_BLINK_STEPS; i++) {
-        wls_boot_blink_step_t step = wls_boot_report_blink_step(&report, i);
-        boot_blink_steps[i]        = step.count;
-        boot_blink_colours[i]      = (RGB){step.r, step.g, step.b};
-    }
-    wls_boot_blink_start(&boot_blink, timer_read32());
+bool wls_indicator_boot_code_owns_matrix(void) {
+    return boot_code_active;
 }
 
-/* Paint the current boot-report step (called every RGB frame). Additive: it only
- * paints while the sequence is running, so it cannot disturb the other passes. */
-void wls_indicator_boot_report(void) {
-    wls_boot_blink_out_t out = wls_boot_blink_tick(&boot_blink, WLS_BOOT_REPORT_BLINK_STEPS, boot_blink_steps, timer_read32());
+void wls_indicator_boot_code_dismiss(void) {
+    boot_code_active = false;
+    boot_code_done   = true;
+}
 
-    if (out.kind != WLS_BOOT_BLINK_SHOW) {
+/* Build the code from the boot facts and start playing. `stage`/`code` come from
+ * the shell, which knows the boot outcome; the mapping to counts and every bit
+ * of the timing is the pure core's.
+ *
+ * The shell holds NO policy here: the show duration is the core's
+ * `wls_boot_code_show_ms()` (derived from the frame, so it can never be shorter
+ * than one repetition) and the origin is the first paint, passed to the core as
+ * a value. The only thing the shell remembers is "has this armed", which is a
+ * latch, not a decision.
+ *
+ * ARMING IS DEFERRED BY ONE PASS, deliberately. The first call happens before
+ * this frame's buffer is flushed to the panel, so an origin taken here would be
+ * up to a frame (plus the RGB pipeline's lead-in) earlier than anything the eye
+ * can see -- and the leading amber pulses would be counted short. Taking the
+ * origin on the second pass makes it a real frame boundary. The core's contract
+ * no longer depends on this (the show window guarantees a complete second
+ * frame), but starting on a boundary keeps the first frame honest too. */
+void wls_indicator_boot_code_start(void) {
+    /* Idempotent: the paint pass calls this every frame, but the code must arm
+     * exactly once. Re-arming would restart the window each frame and the code
+     * would never end. */
+    if (boot_code_active || boot_code_done) {
+        return;
+    }
+    wls_boot_code_t c = wls_boot_code_now();
+    boot_code_counts  = wls_boot_code_counts(c);
+    /* First pass arms without an origin; the next pass (a real frame boundary)
+     * stamps it. `boot_code_started == 0` therefore means "armed, not yet
+     * started" -- the paint is held black until the origin exists, so no pulse
+     * is ever half-shown. */
+    boot_code_started = 0;
+    boot_code_active  = true;
+    boot_code_done    = false;
+}
+
+void wls_indicator_boot_code(void) {
+    if (!boot_code_active) {
+        return;
+    }
+    if (boot_code_started == 0) {
+        boot_code_started = timer_read32();
+        rgb_matrix_set_color_all(0, 0, 0);
+        return;
+    }
+    if (timer_elapsed32(boot_code_started) >= wls_boot_code_show_ms(boot_code_counts)) {
+        boot_code_active = false;
+        boot_code_done   = true;
         return;
     }
 
-    RGB rgb = out.pulse_on ? boot_blink_colours[out.step] : (RGB){0, 0, 0};
-    rgb_matrix_set_color_all(rgb.r, rgb.g, rgb.b);
+    wls_boot_code_out_t out = wls_boot_code_at(boot_code_counts, boot_code_started, timer_read32());
+    if (out.phase == WLS_BOOT_CODE_PHASE_LIT) {
+        rgb_matrix_set_color_all(out.r, out.g, out.b);
+    } else {
+        rgb_matrix_set_color_all(0, 0, 0);
+    }
 }
 
 #endif /* RGB_MATRIX_ENABLE */

@@ -11,7 +11,7 @@
 #include "wireless.h"
 #include "wls/transport_logic.h"
 #include "wls/diag_logic.h"
-#include "wls/boot_report_logic.h"
+#include "wls/boot_code_logic.h"
 #include "connection.h"
 
 #define HS_BT_DEF_PIN C14
@@ -58,21 +58,10 @@ bool hs_keycode_allowed(uint8_t target_devs, uint8_t last_bt);
 bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev);
 
 /* The physical switch position, read from the pins alone (no edge, no persisted
- * state). The one pin read, shared by the boot seed and the transport applier. */
+ * state). The one pin read; its meaning is in `transport_logic.c` and the
+ * decision built from it is in the transport owner (`wls_transport.c`). */
 hsm_switch_pos_t hs_mode_switch_pos(void);
 
-/* Apply the switch position's transport, stated once. Reads the pure
- * `hsm_switch_apply(pos, last_bt)` and, when the position was readable, sets
- * BOTH selectors from that single decision: upstream's connection host
- * (`_noeeprom` — the switch must not overwrite the user's stored intent; only a
- * keycode writes EEPROM) and the vendor device index. Every switch-driven change
- * goes through here, so the two selectors can never be set apart (defect 7).
- *
- * Returns the whole `hsm_switch_apply_t`: callers must check the `kind` before
- * acting on the host. An UNREADABLE position applies nothing (the boot
- * self-detach fix) and the returned `host` is then not a decision — a caller
- * must not drive the USB line from it. */
-hsm_switch_apply_t apply_switch_transport(hsm_switch_pos_t pos, uint8_t last_bt);
 /* Restart the active link countdown (reconnect/sleep) from now, on an activity
  * event such as a keypress or wake. The countdown's policy lives in the pure
  * `hsm_link_watch`; this is only the store-back shell. */
@@ -89,12 +78,43 @@ void wls_diag_gather(wls_diag_t *out);
 /* Increment the diagnostic boot counter (once per MCU boot). */
 void wls_note_boot(void);
 
+/* Read and clear the MCU's latched reset cause (`RCC->RSTSTAT`), once per boot,
+ * and return the latched bits. The chip holds the cause of its last reset until
+ * the latch is cleared, so this is a *consume*: it must run exactly once, before
+ * anything else could clear it, and the returned value is then carried to every
+ * reporter (the LED code and the `0xA4` diag block) so the two cannot disagree.
+ * Call from the same place as `wls_note_boot()`. Returns 0 on a platform with no
+ * such register. */
+uint32_t wls_note_reset_cause(void);
+
+/* The reset-cause bits captured by the last `wls_note_reset_cause()`, for
+ * readers that must not re-consume the latch. 0 until that call has run. */
+uint32_t wls_reset_cause(void);
+
+/* The boot transport decision, as the shell made it, retained so a later
+ * diagnostic read can report on a boot whose USB line did not survive (the
+ * `0xA4` reply needs the line up; a bad boot tears it down). Set once by the boot
+ * seed; read by the diagnostic assembler and by `wls_boot_code_now()`.
+ *
+ * `switch_pos` and `host` are the raw vocabularies used everywhere else on this
+ * board; `settled` says whether the switch read was readable at all. */
+typedef struct {
+    uint8_t switch_pos; /* hsm_switch_pos_t: 0=UNKNOWN,1=USB,2=BT,3=2.4G */
+    uint8_t host;       /* connection host: 3=USB,4=BT,5=2.4G */
+    bool    settled;    /* false = the position was unreadable (nothing applied) */
+    bool    master;     /* this half's own `is_keyboard_master()` answer at boot */
+} wls_boot_report_t;
+
 /* The boot transport decision, retained so a later diagnostic read can report on
- * a boot whose USB line did not survive (see `wls/boot_report_logic`). Set once
- * by the boot seed; read by the diagnostic assembler. */
+ * a boot whose USB line did not survive. Set once by the boot seed; read by the
+ * diagnostic assembler. */
 void              wls_note_boot_decision(wls_boot_report_t report);
 wls_boot_report_t wls_boot_decision(void);
 
+/* The shell's adapter: read the retained boot report plus the two live values
+ * into the pure `wls_boot_facts()` of `wls/boot_code_logic` and return its
+ * stage/code. Read by the `0xA4` assembler and the indicator. */
+wls_boot_code_t wls_boot_code_now(void);
 /* BT profile selection, owned by the Bluetooth driver (item 14b): which of the
  * module's BT1..BT5 profiles is active, and re-pairing it. The sub-index has no
  * home in upstream's `connection` model, so it lives with the driver that
@@ -129,21 +149,35 @@ uint8_t bluetooth_get_profile(void);
 #define KB_BATTERY_IDX_MD_STATE 10
 
 /* Shell-state diagnostic block (the observability seam; `wls/diag_logic`). A
- * fixed 6-byte view of how the firmware currently reads the world — the switch
+ * fixed 10-byte view of how the firmware currently reads the world — the switch
  * position, the device index, the connection host, a boot counter, the USB data
- * line, and the module link state. Encoded by the pure `wls_diag_encode()` so a
- * host reader and the firmware cannot drift. This is the one instrument that
- * works regardless of which transport is up, which is exactly what the
- * shell-only defects (7, 8, 9, and the USB self-detach) needed and lacked. */
+ * line, the module link state, the raw `C14`/`C15`/`B9` pin levels behind
+ * `switch_pos`, and the consumed MCU reset cause. Encoded by the pure
+ * `wls_diag_encode()` so a host reader and the firmware cannot drift. This is the
+ * one instrument that works regardless of which transport is up, which is exactly
+ * what the shell-only defects (7, 8, 9, and the USB self-detach) needed and
+ * lacked. */
 #define KB_BATTERY_IDX_DIAG 11
 
-/* The retained boot decision (`wls/boot_report_logic`), a fixed 3-byte block
- * right after the diag block: the switch position read at boot, the host it
- * applied, and whether that read was settled. It is retained across the boot, so
- * a boot that tore its own USB line down is still reportable on the NEXT
- * successful reply — the case the 6-byte diag block cannot cover, because it is
- * sampled live and the line is gone (the un-settled-boot-read finding). */
-#define KB_BATTERY_IDX_BOOT_REPORT 17
+/* The boot diagnostic code, as the two counts the LED plays: `{amber, white}`
+ * (Dell E-series convention; the full fault table is `wls/boot_code_logic.h`).
+ * It is retained across the boot, so a boot that tore its own USB line down is
+ * still reportable on the NEXT successful reply — the case the diag block
+ * cannot cover, because it is sampled live and the line is gone. Sending the
+ * same pair the eye counts means a host reader and the operator cannot disagree
+ * about what the boot said. Offset to follow the 10-byte diag block (11..20). */
+#define KB_BATTERY_IDX_BOOT_CODE 21
+
+/* The jump journal (`wls/wls_jump_journal`). A `dfa0` DFU window means the magic
+ * word at `__ram0_end__ - 4` was set and the MCU reset; the word is cleared by
+ * the reset handler before any of our code runs, so the jump itself cannot be
+ * observed after the fact. This 12-byte record is written, in `.ram0`, at the one
+ * place the board intends to jump (`bootloader_jump()`), survives the reset, and
+ * is reported here. It discriminates "our `QK_BOOT` ran" (presence byte set)
+ * from "the word appeared with no stamp" (present = 0) — the reading that tells
+ * a dispatched `QK_BOOT` from a corrupt-value write or an electrical one. Offset
+ * to follow the 2-byte boot code (21..22): 23..34. */
+#define KB_BATTERY_IDX_JUMP 23
 
 /* KB_BATTERY_IDX_CHARGE */
 enum kb_battery_charge {

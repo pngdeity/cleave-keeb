@@ -5,6 +5,8 @@
 #include "usb_descriptor.h"
 #include "lowpower_logic.h"
 #include "transport_logic.h"
+#include "wls_transport.h"
+#include "wls_usb.h"
 #include "wls_indicator.h"
 #include "connection.h"
 
@@ -19,7 +21,14 @@ static ioline_t col_pins_right[MATRIX_COLS] = MATRIX_COL_PINS_RIGHT;
  * off, or a local value-down press) could leave a half permanently dark while it
  * still typed over the split link (defect 5). Rather than add a fifth writer,
  * make the rail a pure function of the RGB value and give it one home: every
- * writer now calls this, so the rail self-derives and cannot be latched. */
+ * writer now calls this, so the rail self-derives and cannot be latched.
+ *
+ * ONE deliberate exception, and it is not a fifth writer: `lpwr_stop_hook_pre()`
+ * (below) writes A5 LOW directly before an ordered stop, because this function
+ * derives the rail from `rgb_matrix_get_val()`, which is still non-zero at that
+ * moment -- routing that site through here would turn the rail back ON and
+ * defeat the pre-stop kill. It is the one place the rail is forced off
+ * regardless of RGB, so it stays raw and says so. */
 void wls_led_rail_apply(void) {
     bool on = rgb_matrix_get_val() != 0;
 #if defined(LED_POWER_EN_PIN)
@@ -56,6 +65,30 @@ void wls_note_boot(void) {
     wls_boot_count++;
 }
 
+/* The MCU's latched reset cause, consumed once at boot (see `wls_note_reset_cause`
+ * in `wls.h`). Read-and-clear in one place so the two readers -- the LED boot
+ * code and the `0xA4` diag block -- report the same value; a clear without a
+ * carried read would destroy the evidence, and two reads of the latch after a
+ * clear would disagree. Held as the raw bits; the codec names them. */
+static uint32_t wls_reset_cause_bits = 0;
+
+#if defined(WB32FQ95xx) && defined(RCC)
+uint32_t wls_note_reset_cause(void) {
+    wls_reset_cause_bits = RCC->RSTSTAT;
+    RCC->CLRRSTSTAT      = RCC_CLRRSTSTAT_CLR;
+    return wls_reset_cause_bits;
+}
+#else
+uint32_t wls_note_reset_cause(void) {
+    /* No reset-status register on this platform: nothing to consume. */
+    return wls_reset_cause_bits;
+}
+#endif
+
+uint32_t wls_reset_cause(void) {
+    return wls_reset_cause_bits;
+}
+
 /* The boot transport decision, retained across the boot that made it. The
  * boot-time switch read (and its settled-ness) is the one decision that
  * `wls_diag` cannot report on the failing path, because `wls_diag` rides the
@@ -73,17 +106,60 @@ wls_boot_report_t wls_boot_decision(void) {
     return wls_boot_report;
 }
 
+/* The boot diagnostic code: the *shell* half of the codec. It knows what the
+ * boot did and reads the live values; HOW those values become a stage and a code
+ * is the pure `wls_boot_facts()` in `wls/boot_code_logic` (and how a code becomes
+ * pulses is the rest of that file).
+ *
+ * This function used to hold the precedence table itself -- the last decision in
+ * the board glue that no test could reach. It now gathers three values and
+ * delegates, so the precedence is host-testable (`tests/boot_code_logic`).
+ * The name says what it is: the shell's adapter that reads the *now*, distinct
+ * from the core's `wls_boot_facts(in, reset_cause, boot_count)`. */
+wls_boot_code_t wls_boot_code_now(void) {
+    wls_boot_report_t r = wls_boot_report;
+    wls_boot_inputs_t in;
+    in.master  = r.master;
+    in.settled = r.settled;
+    in.host    = r.host;
+    return wls_boot_facts(in, wls_reset_cause(), wls_boot_count);
+}
+
 /* The shell half of the observability seam: read each live source exactly once
  * into the snapshot. `usb_line` is the firmware's own view of the USB data
- * line: upstream's connection host resolving to USB means the board intends to
- * be on USB (the actuator `wls_usb_connect` drives that line from this). */
+ * line, taken from the transport OWNER's committed host rather than from
+ * upstream's resolved host: the committed value is the intent the actuator was
+ * driven from, so this field reports what the board decided instead of what
+ * upstream would resolve on its own (the two differ exactly when a confirmed
+ * host outranks a switch that reads wireless). */
 void wls_diag_gather(wls_diag_t *out) {
     out->switch_pos = (uint8_t)hs_mode_switch_pos();
     out->devs       = wireless_get_current_devs();
     out->host       = (uint8_t)connection_get_host_raw();
     out->boot_count = wls_boot_count;
-    out->usb_line   = (connection_get_host() == CONNECTION_HOST_USB) ? 1 : 0;
+    out->usb_line   = (wls_transport_current().host == HSM_HOST_USB) ? 1 : 0;
     out->link_state = *md_getp_state();
+    /* The raw levels behind `switch_pos`, so the decode can be audited against
+     * the part. `C14`/`C15` are configured as inputs by `wls_lifecycle_boot()`
+     * (with their pull-ups), so a plain read reports the same lines the switch
+     * rule uses. `B9` uses the settled reader -- it is a pull-up line and an
+     * un-settled read can sample the old floating level and lie. */
+#if defined(HS_BT_DEF_PIN) && defined(HS_2G4_DEF_PIN)
+    out->pin_c14 = gpio_read_pin(HS_BT_DEF_PIN) ? 1 : 0;
+    out->pin_c15 = gpio_read_pin(HS_2G4_DEF_PIN) ? 1 : 0;
+#else
+    out->pin_c14 = 0xFF;
+    out->pin_c15 = 0xFF;
+#endif
+#ifdef SPLIT_HAND_PIN
+    out->pin_b9 = wls_usb_cable_present() ? 1 : 0;
+#else
+    out->pin_b9 = 0xFF;
+#endif
+    /* The consumed reset cause (raw `RSTSTAT` bits, truncated to the low byte --
+     * the six named causes all live in bits 0..5). Reported from the retained
+     * value, never re-read from the latch: the LED code already consumed it. */
+    out->reset_cause = (uint8_t)(wls_reset_cause() & 0xFF);
 }
 
 bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev) {
@@ -95,13 +171,17 @@ bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev) {
     scan_timer = timer_read32();
 #if defined(HS_BT_DEF_PIN) && defined(HS_2G4_DEF_PIN)
     uint8_t        now_mode  = 0x00;
-    uint8_t        hs_mode   = 0x00;
     static uint8_t last_mode = 0x00;
     bool           sw_mode   = false;
     now_mode                 = (HS_GET_MODE_PIN(HS_USB_PIN_STATE) ? 3 : (HS_GET_MODE_PIN(HS_BT_PIN_STATE) ? 1 : ((HS_GET_MODE_PIN(HS_2G4_PIN_STATE) ? 2 : 0))));
-    hs_mode                  = (*mode >= DEVS_BT1 && *mode <= DEVS_BT5) ? 1 : ((*mode == DEVS_2G4) ? 2 : ((*mode == DEVS_USB) ? 3 : 0));
-    sw_mode                  = ((update || (last_mode == now_mode)) && (hs_mode != now_mode)) ? true : false;
-    last_mode                = now_mode;
+    /* Whether the *switch* moved -- a true edge on the pin position, not a
+     * comparison against the resolved transport. Comparing the two asks "does
+     * the transport disagree with the pins?", which under the transport rule is
+     * the *normal* state (a confirmed host outranks a lying switch); that
+     * predicate stayed true every scan and re-drove the actuator, which cut the
+     * data line and re-enumerated about once a second. See `hsm_switch_moved`. */
+    sw_mode   = hsm_switch_moved(hsm_switch_pos_of_mode(now_mode), hsm_switch_pos_of_mode(last_mode), update);
+    last_mode = now_mode;
 
     switch (now_mode) {
         case 1:
@@ -117,12 +197,19 @@ bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev) {
             break;
     }
     if (sw_mode) {
-        /* The switch edge applies both selectors from one read via the shared
-         * applier (defect 7: this once set only the device index, so a runtime
-         * BT->USB flip never re-engaged USB and neither half typed until a
-         * power cycle re-ran the boot path). */
-        apply_switch_transport(hsm_switch_pos_of_mode(now_mode), lsat_btdev);
-
+        /* The switch edge applies both selectors from one read, through the
+         * transport's single owner (defect 7: this once set only the device
+         * index, so a runtime BT->USB flip never re-engaged USB and neither half
+         * typed until a power cycle re-ran the boot path).
+         *
+         * The owner commits once and drives the USB line itself on a real
+         * change. This site is `CONFIRMED`, unlike boot: the switch moved, a real
+         * user action, and a confirmed event owns the demotion. A switch flip
+         * must not route HID to the module while a host cable is present, any
+         * more than the boot may (the same "attached but silent" failure);
+         * unplugging a wireless-mode board stays wireless because `cable_here`
+         * is then false. */
+        wls_transport_decide(WLS_TRANSPORT_INPUT_CONFIRMED);
         /* `sw_mode` is the one predicate that means "the switch really moved",
          * so this is the correct place to confirm the new channel: the
          * indicator fires here and nowhere a re-assert could reach (defect:
@@ -140,9 +227,9 @@ bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev) {
 }
 
 /* The physical switch position, read from the pins alone (no edge, no persisted
- * state). The one pin read, shared by the boot seed and the transport applier
- * below. The mapping (which pin pattern is which position) is the only thing
- * here that is not pure; the meaning of a position lives in `transport_logic.c`. */
+ * state). The one pin read; the meaning of a position lives in
+ * `transport_logic.c`, and the decision built from it lives in the transport
+ * owner (`wls_transport.c`). */
 hsm_switch_pos_t hs_mode_switch_pos(void) {
 #if defined(HS_BT_DEF_PIN) && defined(HS_2G4_DEF_PIN)
     if (HS_GET_MODE_PIN(HS_USB_PIN_STATE)) {
@@ -156,34 +243,11 @@ hsm_switch_pos_t hs_mode_switch_pos(void) {
     return HSM_SWITCH_UNKNOWN;
 }
 
-/* Apply the switch position's transport, stated once. The decision — the whole
- * `{device index, connection host}` pair — is the pure `hsm_switch_apply`; this
- * shell only performs it. Both selectors are set from that one decision, so they
- * cannot drift apart (the defect-7 shape: the switch edge once set only the
- * device index, leaving HID routed to a driver whose module was off).
- *
- * It is a switch-driven change, so the host write is `_noeeprom`: the switch
- * must not overwrite the user's stored intent (14c); only a keycode writes
- * EEPROM. */
-hsm_switch_apply_t apply_switch_transport(hsm_switch_pos_t pos, uint8_t last_bt) {
-    hsm_switch_apply_t apply = hsm_switch_apply(pos, last_bt);
-    /* An unreadable position is not a transport decision. Applying the fallback
-     * would map "unknown" onto a definite transport and mis-drive the USB line
-     * (the boot self-detach: UNKNOWN -> persisted BT index -> "Bluetooth", which
-     * tears the line down). Leave both selectors at their current values; a
-     * settled read will follow (the detector debounces, and the +100 ms
-     * post-init pass re-seeds). */
-    if (apply.kind == HSM_SWITCH_SETTLED) {
-        connection_set_host_noeeprom((connection_host_t)apply.host);
-        wireless_devs_change(wireless_get_current_devs(), apply.devs, false);
-    }
-    /* Return the host we *applied*, not the live one. `connection_set_host_noeeprom`
-     * early-returns when EEPROM already holds this host, so a caller that
-     * re-reads `connection_get_host()` can observe a stale value and mis-drive
-     * the USB line (the Phase A.2 boot-site regression). The applied host is the
-     * one decision, and every caller must use it. */
-    return apply;
-}
+/* The three `apply_switch_transport*` shells that used to live here are gone:
+ * the transport owner (`wls_transport.c`) is now the sole writer of the
+ * `{host, devs}` pair, and it decides from the same pure cores. Keeping the
+ * appliers would have left unsynchronised second writers of the same state --
+ * the exact defect the owner removes (`docs/ADR-transport-authority.md`). */
 
 static hsm_link_timers_t hs_link_timers = {0, 0};
 static uint8_t           hs_link_last_status;
@@ -234,7 +298,7 @@ static hsm_link_state_t hs_link_state(void) {
  * the pure `hsm_link_restart`; this only supplies `now`, the timeouts, and the
  * timers store. */
 void hs_link_activity(void) {
-    hsm_link_restart(hs_link_state(), timer_read32(), HS_LBACK_TIMEOUT, HS_SLEEP_TIMEOUT, &hs_link_timers);
+    hs_link_timers = hsm_link_restart(hs_link_state(), timer_read32(), HS_LBACK_TIMEOUT, HS_SLEEP_TIMEOUT);
 }
 
 bool hs_rgb_blink_hook() {

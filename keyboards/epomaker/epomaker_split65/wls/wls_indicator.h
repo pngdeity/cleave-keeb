@@ -60,12 +60,22 @@ uint32_t wls_bat_suppress_deadline(void);
 /* Arm the post-reset battery suppression. */
 void wls_bat_suppress_arm(void);
 
-/* Start the boot-report blink sequence from the retained boot decision. Called
- * once at boot -- the second exporter, readable with no host link. */
-void wls_indicator_boot_report_start(void);
+/* Start the boot diagnostic code from the boot facts. Called once, at a point
+ * where the RGB frame pass is already live, so its phase is not lost. The code
+ * loops until dismissed (a keypress) or the timeout expires. */
+void wls_indicator_boot_code_start(void);
 
-/* Paint the current boot-report step if the sequence is running (every frame). */
-void wls_indicator_boot_report(void);
+/* Whether the boot code currently owns the matrix. While true, no other
+ * indicator may paint: the code is the highest-priority owner of the frame, and
+ * the arbitration is here rather than in the caller so no other pass can
+ * overwrite it (the defect that made the previous instrument unreadable). */
+bool wls_indicator_boot_code_owns_matrix(void);
+
+/* Paint the current boot-code phase (a no-op unless the code owns the matrix). */
+void wls_indicator_boot_code(void);
+
+/* Dismiss the boot code (a keypress, or the timeout). Idempotent. */
+void wls_indicator_boot_code_dismiss(void);
 
 /* The transport confirmation flash is armed from the mode-switch edge; exposed
  * for the lifecycle concern. */

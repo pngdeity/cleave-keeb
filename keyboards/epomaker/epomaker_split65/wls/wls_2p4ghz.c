@@ -3,6 +3,7 @@
 
 #include "wireless_2p4ghz.h"
 #include "wls.h"
+#include "wls/wls_module.h"
 
 /* The board's 2.4 GHz adapter for the upstream-shaped `wireless_2p4ghz`
  * contract (drivers/wireless/wireless_2p4ghz.h). Like the Bluetooth adapter
@@ -29,7 +30,7 @@ static bool wls_2g4_link_up(void) {
  * USB or a BT profile. */
 static void wls_2g4_poke_if_down(void) {
     if (wls_is_2g4() && *md_getp_state() != MD_STATE_CONNECTED) {
-        wireless_devs_change(wireless_get_current_devs(), wireless_get_current_devs(), false);
+        wls_module_devs_change(wls_module_devs(), wls_module_devs(), false);
     }
 }
 

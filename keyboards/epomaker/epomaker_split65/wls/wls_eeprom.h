@@ -63,6 +63,11 @@ void eeconfig_confinfo_init(void);
 /* Configure the split serial port (the module UART is a separate driver). */
 void usart_init(void);
 
+/* The persisted BT device index to fall back on when the switch is unreadable.
+ * Lives here because it reads `confinfo` (the storage this concern owns); the
+ * transport owner and the boot pass both use it. */
+uint8_t last_btdev_from_confinfo(void);
+
 /* Wipe the board's persisted configuration to defaults: re-initialise the
  * EEPROM, restore the rgb-matrix and rgblight defaults, re-read the keymap and
  * clear NKRO. This is the settings-reset's `WIPE_CONFIG` step, owned here so the

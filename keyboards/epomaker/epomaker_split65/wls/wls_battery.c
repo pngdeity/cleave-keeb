@@ -9,6 +9,7 @@
 #    include "usb_descriptor.h"
 #    include "sync_timer.h"
 #    include "connection.h"
+#    include "wls_jump_journal.h"
 
 /* Raw HID leaves through the upstream `raw_hid_send()`: it calls
  * `host_raw_hid_send()`, which selects the driver from the connection host
@@ -46,12 +47,17 @@ static void kb_battery_send(const kb_battery_snapshot_t *snap) {
     wls_diag_gather(&diag);
     wls_diag_encode(&diag, &buf[KB_BATTERY_IDX_DIAG]);
 
-    /* The retained boot decision (the second exporter; `wls/boot_report_logic`).
-     * Its own pure encode, so a host reader and the firmware cannot drift. It is
-     * reportable even when the boot it describes tore the USB line down, because
-     * it is retained rather than sampled live. */
-    wls_boot_report_t boot_report = wls_boot_decision();
-    wls_boot_report_encode(&boot_report, &buf[KB_BATTERY_IDX_BOOT_REPORT]);
+    /* The retained boot decision (the second exporter). Reported as the SAME
+     * `(amber, white)` code the LED plays, so a host reader and the eye cannot
+     * disagree about what the boot said. It is reportable even when the boot it
+     * describes tore the USB line down, because it is retained, not sampled. */
+    wls_boot_code_encode(wls_boot_code_counts(wls_boot_code_now()), &buf[KB_BATTERY_IDX_BOOT_CODE]);
+
+    /* The jump journal: the record our `bootloader_jump()` writes into `.ram0`
+     * before it jumps, which survives the reset the jump performs. Its presence
+     * byte is the discriminator between a dispatched `QK_BOOT` and a magic word
+     * that appeared without our stamp. */
+    wls_jump_journal_encode(wls_jump_journal(), &buf[KB_BATTERY_IDX_JUMP]);
 
     raw_hid_send(buf, RAW_EPSIZE);
 }

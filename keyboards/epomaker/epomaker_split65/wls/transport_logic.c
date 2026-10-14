@@ -21,10 +21,27 @@
 #define HSM_KC_BT3 0x7E02
 #define HSM_KC_2G4 0x7E03
 
-/* The board's numeric mode (the `now_mode` the pin read produces in wls.c),
- * as a `hsm_switch_pos_t`. Kept here so the resolution rule takes the switch
- * position in one canonical form wherever it is derived. */
-hsm_switch_pos_t hsm_switch_pos_of_mode(uint8_t now_mode);
+/* The one place that knows what "is a BT device index" means. Every site that
+ * clamps a possibly-corrupt value into the BT range uses these; the fallback is
+ * a *parameter* because it legitimately differs per site (BT1 where a BT device
+ * is required, USB where the switch said nothing, 0 where "no BT profile" is
+ * meant). Passing it keeps each site's choice visible instead of hiding a
+ * literal behind a shared rule. */
+bool hsm_devs_is_bt(uint8_t devs) {
+    return devs >= HSM_DEVS_BT1 && devs <= HSM_DEVS_BT5;
+}
+
+uint8_t hsm_btdev_or(uint8_t devs, uint8_t fallback) {
+    return hsm_devs_is_bt(devs) ? devs : fallback;
+}
+
+bool hsm_confinfo_needs_default(uint32_t raw, uint8_t version, uint8_t current_version) {
+    /* A blank block, or one written by older firmware (a different layout), is
+     * re-defaulted. Testing the version rather than guessing per field makes the
+     * migration deterministic; the *decision* is here, the write stays in the
+     * shell that owns the store. */
+    return raw == 0 || version != current_version;
+}
 
 uint8_t hsm_boot_devs(hsm_switch_pos_t pos, uint8_t last_bt) {
     switch (pos) {
@@ -33,14 +50,14 @@ uint8_t hsm_boot_devs(hsm_switch_pos_t pos, uint8_t last_bt) {
         case HSM_SWITCH_BT:
             /* The switch cannot say which of BT1..5; persistence supplies it,
              * clamped to the BT range so a corrupt value cannot select USB/2.4G. */
-            return (last_bt >= HSM_DEVS_BT1 && last_bt <= HSM_DEVS_BT5) ? last_bt : HSM_DEVS_BT1;
+            return hsm_btdev_or(last_bt, HSM_DEVS_BT1);
         case HSM_SWITCH_2G4:
             return HSM_DEVS_2G4;
         case HSM_SWITCH_UNKNOWN:
         default:
             /* No position reads true: keep the persisted intent (the switch may
              * be absent or mid-travel). */
-            return (last_bt >= HSM_DEVS_BT1 && last_bt <= HSM_DEVS_BT5) ? last_bt : HSM_DEVS_USB;
+            return hsm_btdev_or(last_bt, HSM_DEVS_USB);
     }
 }
 
@@ -73,6 +90,114 @@ hsm_switch_apply_t hsm_switch_apply(hsm_switch_pos_t pos, uint8_t last_bt) {
     result.devs = hsm_boot_devs(pos, last_bt);
     result.host = hsm_host_of_devs(result.devs);
     return result;
+}
+
+/* The switch is one INPUT among several, not the sole authority.
+ *
+ * The switch alone was treated as absolute, so a single wrong pin read routed
+ * every keystroke to a transport that was not there: a settled read of 2.4 GHz
+ * with a host cable present sends HID to the module UART and nothing reaches the
+ * host -- "enumerated, lit, silent" (the magenta boot blink). The cable is a
+ * physical fact and outranks a switch *preference*, so `cable_here` (a settled
+ * `B9` read: this half has the host cable) wins outright; an unreadable switch
+ * then degrades to the persisted intent instead of poisoning the decision.
+ *
+ * Precedence is "trust the most reliable signal that is present", highest first:
+ *   1. cable present        -> USB, regardless of the switch
+ *   2. switch settled       -> the switch's transport
+ *   3. switch unreadable    -> the persisted device index
+ * There is no case where a cable is present and the answer is not USB, which is
+ * what makes the observed failure unrepresentable. */
+hsm_switch_apply_t hsm_switch_apply_with_cable(hsm_switch_pos_t pos, uint8_t last_bt, bool cable_here) {
+    if (cable_here) {
+        hsm_switch_apply_t usb;
+        usb.kind = HSM_SWITCH_SETTLED;
+        usb.devs = HSM_DEVS_USB;
+        usb.host = HSM_HOST_USB;
+        return usb;
+    }
+    /* No cable: the switch is now the best available intent. An unreadable read
+     * still carries no transport, but rather than leaving both selectors at
+     * whatever they were, fall back to the persisted device index -- the last
+     * known-good intent survives a reboot, so it is a better answer than the
+     * stale live value the caller happened to hold. */
+    if (pos == HSM_SWITCH_UNKNOWN) {
+        hsm_switch_apply_t result;
+        result.kind = HSM_SWITCH_SETTLED;
+        result.devs = hsm_btdev_or(last_bt, HSM_DEVS_USB);
+        result.host = hsm_host_of_devs(result.devs);
+        return result;
+    }
+    return hsm_switch_apply(pos, last_bt);
+}
+
+/* The two-stage rule: hints first, then the USB peripheral's own confirmation.
+ *
+ * `hsm_switch_apply_with_cable` decides from *intent* signals -- the switch and
+ * the cable-detect pin. Neither can tell "a host is connected" from "something
+ * is supplying power": a dumb PSU raises `B9` and provides VBUS exactly as a
+ * host does, so `cable_here` alone would force USB and leave the keyboard silent
+ * with nothing to type to. The only input that answers the real question is the
+ * device's own enumeration result, `usb_connected_state()`
+ * (`USB_DRIVER.state == USB_ACTIVE`), which a PSU never reaches.
+ *
+ * That signal arrives *late* (only after enumeration, ~100 ms+), so it cannot be
+ * the only input: before it resolves, a genuine host is indistinguishable from a
+ * PSU. Hence two stages:
+ *   1. USB active   -> USB. A confirmed host is a fact, and it outranks every
+ *                      hint (it also fixes a switch that lies).
+ *   2. otherwise    -> the hint (`hint`), which is the caller's cable/switch/
+ *                      persisted decision. A PSU never reaches stage 1, so the
+ *                      hint stands and the board stays wireless.
+ *
+ * `hint` is passed in already resolved (the caller runs
+ * `hsm_switch_apply_with_cable` for it) so this core composes rather than
+ * duplicates, and stays pure over plain values. */
+hsm_switch_apply_t hsm_transport_decide(hsm_switch_apply_t hint, bool usb_active) {
+    if (usb_active) {
+        hsm_switch_apply_t usb;
+        usb.kind = HSM_SWITCH_SETTLED;
+        usb.devs = HSM_DEVS_USB;
+        usb.host = HSM_HOST_USB;
+        return usb;
+    }
+    return hint;
+}
+
+bool hsm_transport_changed(uint8_t decision_host, uint8_t decision_devs, uint8_t committed_host, uint8_t committed_devs) {
+    return decision_host != committed_host || decision_devs != committed_devs;
+}
+
+bool hsm_host_present_on_notify(int configure_state) {
+    /* Mirrors `usb_configure_state_t`: NO_INIT=0, INIT=1, CONFIGURED=2,
+     * SUSPEND=3. Only CONFIGURED and SUSPEND mean the host is still there.
+     * SUSPEND is a host *idle*, and QMK handles it with remote wakeup -- reading
+     * it as a loss would re-decide on the switch hint and drop the data line the
+     * moment the host stopped polling. */
+    return configure_state == 2 /* CONFIGURED */ || configure_state == 3 /* SUSPEND */;
+}
+
+bool hsm_transport_may_act(bool ready) {
+    return ready;
+}
+
+bool hsm_module_may_act(bool ready) {
+    /* The module's own gate: `wireless_devs_change` reaches a ring buffer that
+     * exists only after `wireless_init()`. See the header. */
+    return ready;
+}
+
+bool hsm_transport_may_drive_line(bool decision_is_usb) {
+    /* An unconfirmed decision may only ever turn the line ON. See the header for
+     * why the down direction destroys the confirmation that outranks it. */
+    return decision_is_usb;
+}
+
+bool hsm_switch_moved(hsm_switch_pos_t now_pos, hsm_switch_pos_t last_pos, bool forced) {
+    if (forced) {
+        return true;
+    }
+    return now_pos != last_pos;
 }
 
 hsm_switch_pos_t hsm_switch_pos_of_mode(uint8_t now_mode) {
@@ -110,7 +235,7 @@ hsm_switch_pos_t hsm_switch_pos_of_hs_mode(uint8_t hs_mode) {
 }
 
 bool hsm_keycode_allowed(hsm_switch_pos_t pos, uint8_t target_devs) {
-    bool target_is_bt  = (target_devs >= HSM_DEVS_BT1 && target_devs <= HSM_DEVS_BT5);
+    bool target_is_bt  = hsm_devs_is_bt(target_devs);
     bool target_is_2g4 = (target_devs == HSM_DEVS_2G4);
 
     switch (pos) {
@@ -134,7 +259,7 @@ uint8_t hsm_profile_of_devs(uint8_t devs) {
     /* The BT profile number IS the device index on a BT1..5 index (DEVS_BT1..5 =
      * 1..5), so the profile is derived, never stored. 0 means "no BT profile"
      * (USB / 2.4 GHz), which is what the readback should report then. */
-    return (devs >= HSM_DEVS_BT1 && devs <= HSM_DEVS_BT5) ? devs : 0;
+    return hsm_devs_is_bt(devs) ? devs : 0;
 }
 
 int16_t hsm_long_press_devs(uint16_t keycode) {
@@ -159,10 +284,10 @@ uint8_t hsm_seed_btdev(uint8_t current_devs, uint8_t last_bt) {
      * switch is not on BT, so fall back to the persisted last BT index (clamped
      * to the BT range). This is what lets the scan seed from the *live* device
      * index instead of a RAM mirror of the stored one. */
-    if (current_devs >= HSM_DEVS_BT1 && current_devs <= HSM_DEVS_BT5) {
+    if (hsm_devs_is_bt(current_devs)) {
         return current_devs;
     }
-    return (last_bt >= HSM_DEVS_BT1 && last_bt <= HSM_DEVS_BT5) ? last_bt : HSM_DEVS_BT1;
+    return hsm_btdev_or(last_bt, HSM_DEVS_BT1);
 }
 
 uint8_t hsm_mode_seed(uint8_t current_devs) {
@@ -179,13 +304,15 @@ static bool hsm_deadline_reached(uint32_t at, uint32_t now) {
     return at != 0 && (int32_t)(now - at) >= 0;
 }
 
-void hsm_link_restart(hsm_link_state_t state, uint32_t now, uint32_t reconnect_timeout, uint32_t sleep_timeout, hsm_link_timers_t *timers) {
+hsm_link_timers_t hsm_link_restart(hsm_link_state_t state, uint32_t now, uint32_t reconnect_timeout, uint32_t sleep_timeout) {
     /* Activity starts the countdown for the state we are in, and clears the
      * other state's deadline (it does not apply). This is the pure form of the
      * old "hs_rgb_blink_set_timer(timer_read32())" activity reset, but scoped to
      * the active countdown so one event cannot arm a foreign timer. */
-    timers->reconnect_at = (state == HSM_LINK_DISCONNECTED) ? now + reconnect_timeout : 0;
-    timers->sleep_at     = (state == HSM_LINK_CONNECTED) ? now + sleep_timeout : 0;
+    hsm_link_timers_t timers;
+    timers.reconnect_at = (state == HSM_LINK_DISCONNECTED) ? now + reconnect_timeout : 0;
+    timers.sleep_at     = (state == HSM_LINK_CONNECTED) ? now + sleep_timeout : 0;
+    return timers;
 }
 
 hsm_link_action_t hsm_link_watch(hsm_link_state_t state, bool state_changed, uint32_t now, uint32_t reconnect_timeout, uint32_t sleep_timeout, hsm_link_timers_t *timers) {

@@ -57,7 +57,14 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
 // clang-format on
 
 bool is_keyboard_master(void) {
+    /* B9 settled, matching the core's own read of the same pin
+     * (`is_keyboard_left_impl`, quantum/split_common/split_util.c): an un-settled
+     * read of this pull-up line can sample the old floating level and report the
+     * wrong role. B9 is USB cable detection -- the half with the host cable is
+     * the master -- so deducing mastery from it is right; reading it unsettled
+     * was not. */
     gpio_set_pin_input(SPLIT_HAND_PIN);
+    wait_us(100);
     return gpio_read_pin(SPLIT_HAND_PIN);
 }
 
@@ -72,4 +79,3 @@ void keyboard_post_init_user(void) {
     rgb_matrix_mode(RGB_MATRIX_SOLID_COLOR);
     rgb_matrix_sethsv(RGB_MATRIX_DEFAULT_HUE, RGB_MATRIX_DEFAULT_SAT, RGB_MATRIX_DEFAULT_VAL);
 }
-

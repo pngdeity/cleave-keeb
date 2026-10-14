@@ -32,10 +32,30 @@ typedef struct {
     uint8_t boot_count; /* increments once per MCU boot (reset-loop detector) */
     uint8_t usb_line;   /* 1 if the USB data line is currently connected */
     uint8_t link_state; /* module MD_STATE_* value */
+    /* The RAW levels behind `switch_pos`, so the decode can be audited against
+     * the physical part instead of trusted. `switch_pos` is `hsm_switch_pos_t`
+     * derived from these two pins; the pins are measured (across boots) to LIE
+     * -- `C14`/`C15` are bridged through ~98 kOhm rather than being an SPDT, so
+     * the part can read a position the knob is not in, and the lie has not even
+     * been stable across boots. Reporting the levels is what turns "the pins
+     * lie" into a specific, repeatable measurement, and it is the fact any
+     * transport-rule change must be based on. `pin_b9` is the settled cable
+     * detect: a real host cable present should read high, and whether it does
+     * decides whether `B9` can be used as a cable hint at all. */
+    uint8_t pin_c14; /* raw HS_BT_DEF_PIN level at gather time */
+    uint8_t pin_c15; /* raw HS_2G4_DEF_PIN level at gather time */
+    uint8_t pin_b9;  /* raw SPLIT_HAND_PIN (cable detect) level at gather time */
+    /* The MCU's latched reset cause (`RCC->RSTSTAT`), consumed once at boot. The
+     * chip names why it last reset and holds it; the LED speaks the same value in
+     * its own stage, so this byte is the host's copy of one fact, not a second
+     * reading. Zero means nothing was latched. Letting both readers carry the same
+     * consumed value is the point -- re-reading the latch after a clear would
+     * disagree with the LED. */
+    uint8_t reset_cause;
 } wls_diag_t;
 
 /* The fixed on-the-wire size of an encoded snapshot. */
-#define WLS_DIAG_ENC_SIZE 6
+#define WLS_DIAG_ENC_SIZE 10
 
 /* Encode `d` into `out` (at least WLS_DIAG_ENC_SIZE bytes). Pure: same input,
  * same bytes. Returns the number of bytes written. */

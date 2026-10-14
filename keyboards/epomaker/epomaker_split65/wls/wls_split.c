@@ -13,6 +13,7 @@
 #include "lowpower.h"
 #include "wls/wls.h"
 #include "wls/wls_lifecycle.h"
+#include "wls/wls_module.h"
 
 bool wls_split_send(uint8_t cmd, const uint8_t body[4]) {
     master_to_slave_t m2s = {0};
@@ -46,7 +47,7 @@ void user_sync_mms_slave_handler(uint8_t in_buflen, const void *in_data, uint8_t
 
     switch (action.kind) {
         case WLS_SPLIT_ACT_SYNC_DEVICE_INDEX:
-            wireless_devs_change(action.last_devs, action.now_devs, false);
+            wls_module_devs_change(action.last_devs, action.now_devs, false);
             s2m->resp = 0x00;
             break;
         case WLS_SPLIT_ACT_ORDER_SLEEP:

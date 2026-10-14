@@ -4,6 +4,7 @@
 #include "wls_eeprom.h"
 
 #include "wls/wls.h"
+#include "wls/transport_logic.h"
 
 confinfo_t confinfo;
 
@@ -36,12 +37,13 @@ void eeconfig_confinfo_default(void) {
 
 void eeconfig_confinfo_init(void) {
     confinfo.raw = eeconfig_confinfo_read();
-    /* A blank block, or one written by older firmware (different layout), is
-     * re-defaulted. The version gate makes the migration deterministic instead
-     * of guessing per field. */
-    if (!confinfo.raw || confinfo.version != CONFINFO_VERSION) {
+    if (hsm_confinfo_needs_default(confinfo.raw, confinfo.version, CONFINFO_VERSION)) {
         eeconfig_confinfo_default();
     }
+}
+
+uint8_t last_btdev_from_confinfo(void) {
+    return hsm_btdev_or(confinfo.devs, confinfo.last_btdevs);
 }
 
 void wls_eeprom_wipe_config(void) {
