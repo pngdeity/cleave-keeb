@@ -122,6 +122,13 @@
 /* WS2812 */
 #define WS2812_SPI_DRIVER  SPIDM2
 #define WS2812_SPI_DIVISOR 32
+/* The panel is RGB-ordered. Upstream defaults this to GRB, and the struct layout
+ * in `drivers/led/ws2812.h` is byte-order-dependent, so the default made the two
+ * swaps cancel: the source bytes reached the wire as [G,R,B] and every colour
+ * was wrong. Amber (255,96,0) was read by the panel as (96,255,0) -- a saturated
+ * yellow-green the eye calls green. This is our panel's fact, not a timing one;
+ * WS2812_SPI_DIVISOR above governs pulse width and cannot reorder bytes. */
+#define WS2812_BYTE_ORDER WS2812_BYTE_ORDER_RGB
 
 /* rgb_record */
 #define ENABLE_RGB_MATRIX_RGBR_PLAY
