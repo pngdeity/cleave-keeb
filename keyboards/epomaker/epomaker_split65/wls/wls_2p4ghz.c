@@ -98,6 +98,9 @@ void wireless_2p4ghz_send_nkro(report_nkro_t *report) {
             for (uint8_t c = 0; c < key_count; c++) {
                 for (n = 0; n < NKRO_REPORT_BITS && !temp_report_nkro.bits[n]; n++) {
                 }
+                if (n >= NKRO_REPORT_BITS) {
+                    break;
+                }
                 usageid = (n << 3) | biton(temp_report_nkro.bits[n]);
                 del_key_bit(&temp_report_nkro, usageid);
                 if (usageid == temp_report_keyboard.keys[i]) {
@@ -123,6 +126,9 @@ void wireless_2p4ghz_send_nkro(report_nkro_t *report) {
 
             for (n = 0; n < NKRO_REPORT_BITS && !temp_report_nkro.bits[n]; n++) {
             }
+            if (n >= NKRO_REPORT_BITS) {
+                break;
+            }
             usageid = (n << 3) | biton(temp_report_nkro.bits[n]);
             del_key_bit(&temp_report_nkro, usageid);
 
@@ -145,7 +151,10 @@ void wireless_2p4ghz_send_nkro(report_nkro_t *report) {
     }
 
     /* As the vendor path does: send the collapsed 6KRO report alongside the
-     * NKRO bitmap, because the module has no separate NKRO-flag channel. */
+     * NKRO bitmap, because the module has no separate NKRO-flag channel. The
+     * struct is passed directly rather than copied into a sized buffer, so its
+     * size is an implicit contract with `md_send_kb()` -- pin it. */
+    _Static_assert(sizeof(report_keyboard_t) == MD_SND_CMD_KB_LEN, "report_keyboard_t must match the module's KB frame size");
     md_send_kb((uint8_t *)&temp_report_keyboard);
     md_send_nkro(wls_report_nkro);
 }

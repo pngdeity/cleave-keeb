@@ -142,8 +142,11 @@ void wls_diag_gather(wls_diag_t *out) {
     /* The raw levels behind `switch_pos`, so the decode can be audited against
      * the part. `C14`/`C15` are configured as inputs by `wls_lifecycle_boot()`
      * (with their pull-ups), so a plain read reports the same lines the switch
-     * rule uses. `B9` uses the settled reader -- it is a pull-up line and an
-     * un-settled read can sample the old floating level and lie. */
+     * rule uses. `B9` goes through `wls_usb_cable_present()`, which reads
+     * `SPLIT_HAND_PIN` after `wait_us(100)` -- the same idiom upstream's
+     * `is_keyboard_left_impl()` uses, and *not* a measured settle for this line:
+     * the read is of a bare input with the pull-up dropped. The field is the
+     * board's cable view, not a guarantee that the line was settled. */
 #if defined(HS_BT_DEF_PIN) && defined(HS_2G4_DEF_PIN)
     out->pin_c14 = gpio_read_pin(HS_BT_DEF_PIN) ? 1 : 0;
     out->pin_c15 = gpio_read_pin(HS_2G4_DEF_PIN) ? 1 : 0;
@@ -162,7 +165,7 @@ void wls_diag_gather(wls_diag_t *out) {
     out->reset_cause = (uint8_t)(wls_reset_cause() & 0xFF);
 }
 
-bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev) {
+bool hs_modeio_detection(bool update) {
     static uint32_t scan_timer = 0x00;
 
     if ((update != true) && (timer_elapsed32(scan_timer) <= (HS_MODEIO_DETECTION_TIME))) {
@@ -170,32 +173,22 @@ bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev) {
     }
     scan_timer = timer_read32();
 #if defined(HS_BT_DEF_PIN) && defined(HS_2G4_DEF_PIN)
-    uint8_t        now_mode  = 0x00;
-    static uint8_t last_mode = 0x00;
-    bool           sw_mode   = false;
-    now_mode                 = (HS_GET_MODE_PIN(HS_USB_PIN_STATE) ? 3 : (HS_GET_MODE_PIN(HS_BT_PIN_STATE) ? 1 : ((HS_GET_MODE_PIN(HS_2G4_PIN_STATE) ? 2 : 0))));
+    static hsm_switch_pos_t last_pos = HSM_SWITCH_UNKNOWN;
     /* Whether the *switch* moved -- a true edge on the pin position, not a
      * comparison against the resolved transport. Comparing the two asks "does
      * the transport disagree with the pins?", which under the transport rule is
      * the *normal* state (a confirmed host outranks a lying switch); that
      * predicate stayed true every scan and re-drove the actuator, which cut the
-     * data line and re-enumerated about once a second. See `hsm_switch_moved`. */
-    sw_mode   = hsm_switch_moved(hsm_switch_pos_of_mode(now_mode), hsm_switch_pos_of_mode(last_mode), update);
-    last_mode = now_mode;
-
-    switch (now_mode) {
-        case 1:
-            *mode = hs_bt;
-            break;
-        case 2:
-            *mode = hs_2g4;
-            break;
-        case 3:
-            *mode = hs_usb;
-            break;
-        default:
-            break;
-    }
+     * data line and re-enumerated about once a second. See `hsm_switch_moved`.
+     *
+     * The position comes from `hs_mode_switch_pos()`, the board's one switch
+     * read. This used to decode the same three macros a second time into a
+     * 1/2/3/`now_mode` vocabulary only to map it straight back with
+     * `hsm_switch_pos_of_mode`; two decoders of one pin read is one decoder too
+     * many, and the round-trip was the only consumer of the intermediate. */
+    hsm_switch_pos_t pos     = hs_mode_switch_pos();
+    bool             sw_mode = hsm_switch_moved(pos, last_pos, update);
+    last_pos                 = pos;
     if (sw_mode) {
         /* The switch edge applies both selectors from one read, through the
          * transport's single owner (defect 7: this once set only the device
@@ -220,7 +213,7 @@ bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev) {
         return true;
     }
 #else
-    *mode = hs_none;
+    (void)update;
 #endif
 
     return false;
@@ -232,15 +225,16 @@ bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev) {
  * owner (`wls_transport.c`). */
 hsm_switch_pos_t hs_mode_switch_pos(void) {
 #if defined(HS_BT_DEF_PIN) && defined(HS_2G4_DEF_PIN)
-    if (HS_GET_MODE_PIN(HS_USB_PIN_STATE)) {
-        return HSM_SWITCH_USB;
-    } else if (HS_GET_MODE_PIN(HS_BT_PIN_STATE)) {
-        return HSM_SWITCH_BT;
-    } else if (HS_GET_MODE_PIN(HS_2G4_PIN_STATE)) {
-        return HSM_SWITCH_2G4;
-    }
-#endif
+    /* The pins become the board's numeric mode, and the mode becomes a position
+     * through the one tested core mapper. This is deliberately *not* an inline
+     * `if/else` chain here: the decode existed in two places (this one and the
+     * detector's), one of which has now been removed, and the canonical mapping
+     * is the core's job (see `hsm_switch_pos_of_mode`). */
+    uint8_t now_mode = (HS_GET_MODE_PIN(HS_USB_PIN_STATE) ? 3 : (HS_GET_MODE_PIN(HS_BT_PIN_STATE) ? 1 : ((HS_GET_MODE_PIN(HS_2G4_PIN_STATE) ? 2 : 0))));
+    return hsm_switch_pos_of_mode(now_mode);
+#else
     return HSM_SWITCH_UNKNOWN;
+#endif
 }
 
 /* The three `apply_switch_transport*` shells that used to live here are gone:
@@ -252,29 +246,28 @@ hsm_switch_pos_t hs_mode_switch_pos(void) {
 static hsm_link_timers_t hs_link_timers = {0, 0};
 static uint8_t           hs_link_last_status;
 
-bool hs_mode_scan(bool update, uint8_t moude, uint8_t lsat_btdev) {
-    if (hs_modeio_detection(update, &moude, lsat_btdev)) {
+bool hs_mode_scan(bool update) {
+    if (hs_modeio_detection(update)) {
         return true;
     }
     hs_rgb_blink_hook();
     return false;
 }
 
-bool hs_keycode_allowed(uint8_t target_devs, uint8_t last_bt) {
+bool hs_keycode_allowed(uint8_t target_devs) {
     /* The switch gate, stated once. Every wireless keycode asked the same
      * three-part question inline — seed the detector from the live device index,
      * read the switch position, and test whether that position permits this
      * target — and answered it with six private copies of the predicate
      * (defect-7's shape: a rule written N times). The decision itself is the
      * tested pure `hsm_keycode_allowed`; this only supplies it the switch
-     * position, mapped from the detector's output vocabulary.
+     * position, from the board's one switch read.
      *
-     * `last_bt` is the persisted BT sub-index, which the switch cannot express
-     * and which lives in board state (`confinfo`); the caller passes it in so
-     * this file stays free of board-only globals. */
-    uint8_t mode = hsm_mode_seed(wireless_get_current_devs());
-    hs_modeio_detection(true, &mode, hsm_seed_btdev(wireless_get_current_devs(), last_bt));
-    return hsm_keycode_allowed(hsm_switch_pos_of_hs_mode(mode), target_devs);
+     * The persisted BT sub-index used to be threaded in here to seed the
+     * detector; the detector now reads the pins directly, so it is no longer a
+     * parameter. A caller that needs the persisted index still reads
+     * `confinfo.last_btdevs` itself (see `wls_eeprom.c`). */
+    return hsm_keycode_allowed(hs_mode_switch_pos(), target_devs);
 }
 
 /* Map the module's MD_STATE_* onto the pure core's link-state enum. */

@@ -17,13 +17,15 @@
  * `present` is the discriminator: 1 only if `magic` matches, i.e. this board
  * wrote the journal at least once since power-on. `version`, `generation`,
  * `stage`, `code`, `reset_cause` and `uptime_ms` are reported raw.
- * Layout (WLS_JUMP_JOURNAL_ENC_SIZE bytes, little-endian for the two 32-bit
- * fields):
+ * Layout (WLS_JUMP_JOURNAL_ENC_SIZE bytes). The widths are what the report has
+ * room for, not the struct's: the journal block must fit the `0xA4` report after
+ * the boot-code pair, so `reset_cause` is one byte (its latch has six bits) and
+ * `uptime_ms` is three (little-endian). See `wls/wls.h` for the block offset.
  *
  *   [0 present][1 version][2 generation][3 stage][4 code]
- *   [5..8 reset_cause][9..11 uptime_ms] */
+ *   [5 reset_cause][6..8 uptime_ms] */
 
-#define WLS_JUMP_JOURNAL_ENC_SIZE 12
+#define WLS_JUMP_JOURNAL_ENC_SIZE 9
 
 /* `magic` distinguishes "this journal has been written at least once since
  * power-on" from the arbitrary RAM a cold boot leaves. A reader that sees this

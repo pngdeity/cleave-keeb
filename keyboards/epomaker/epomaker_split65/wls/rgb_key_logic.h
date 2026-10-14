@@ -8,7 +8,7 @@
 
 /* Pure decisions for the RGB / rgblight keycodes.
  *
- * The four `QK_RGB_MATRIX_*` keycodes each carried their own threshold
+ * Each `QK_RGB_MATRIX_*` keycode used to carry its own threshold
  * comparison and side effect inline in `process_record_kb`'s switch -- magic
  * numbers (215, 120, 95, 30, and the mode literal 29 -> 31) with no test
  * coverage, which is the shape that produced defects 7 and 8 (policy stated in
@@ -16,7 +16,11 @@
  * are named and the decision is a value.
  *
  * The shell (`wls_keymap.c`) supplies the live speed/value/mode and applies the
- * returned instruction. The numbers are the *policy*; the shell holds none. */
+ * returned instruction. The numbers are the *policy*; the shell holds none.
+ *
+ * Only `QK_RGB_MATRIX_SPEED_*`/`QK_RGB_MATRIX_VALUE_*`/`QK_RGB_MATRIX_MODE_NEXT`
+ * arrive here; every other keycode (including the mode-*previous* keys) returns
+ * `NONE` and falls through to the matrix's own handler. */
 
 /* The threshold at or above which a speed-up key acknowledges at the rail; the
  * one at or below which a speed-down acknowledges. */
@@ -55,6 +59,6 @@ typedef struct {
     bool    pressed;
 } wls_rgb_state_t;
 
-/* Decide the instruction for `keycode` (one of the four `QK_RGB_MATRIX_*`
- * keys), or NONE for anything else. Pure: no firmware state, no side effects. */
+/* Decide the instruction for `keycode` (one of the `QK_RGB_MATRIX_*` keys), or
+ * NONE for anything else. Pure: no firmware state, no side effects. */
 wls_rgb_key_action_t wls_rgb_key_decide(uint16_t keycode, const wls_rgb_state_t *state);

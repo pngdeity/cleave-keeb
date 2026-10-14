@@ -221,8 +221,11 @@ void rgb_matrix_hs_indicator_set(uint8_t index, RGB rgb, uint32_t interval, uint
     }
 }
 
-void rgb_matrix_hs_set_remain_time(uint8_t index, uint8_t remain_time) {
-    (void)remain_time;
+/* Cancel the running set-flash on `index`, if any. (The vendor API this
+ * replaces took a `remain_time` it never read and only ever cleared the entry;
+ * every caller passed 0. Stating the real effect -- cancel-by-index -- removes
+ * the lie, and the dead parameter with it.) */
+void rgb_matrix_hs_cancel_index(uint8_t index) {
     for (int i = 0; i < HS_RGB_INDICATOR_COUNT; i++) {
         if (hs_rgb_indicators[i].index == index) {
             hs_rgb_indicators[i].blink.remaining   = 0;
@@ -336,6 +339,7 @@ void wls_bat_suppress_arm(void) {
  * state. Here the code is the highest-priority owner -- while it plays, nothing
  * else paints. */
 static bool                   boot_code_active  = false;
+static bool                   boot_code_armed   = false;
 static uint32_t               boot_code_started = 0;
 static bool                   boot_code_done    = false;
 static wls_boot_code_counts_t boot_code_counts;
@@ -375,11 +379,13 @@ void wls_indicator_boot_code_start(void) {
     }
     wls_boot_code_t c = wls_boot_code_now();
     boot_code_counts  = wls_boot_code_counts(c);
-    /* First pass arms without an origin; the next pass (a real frame boundary)
-     * stamps it. `boot_code_started == 0` therefore means "armed, not yet
-     * started" -- the paint is held black until the origin exists, so no pulse
-     * is ever half-shown. */
-    boot_code_started = 0;
+    /* Armed but not yet started: the paint is held black until an origin is
+     * stamped on the next pass (a real frame boundary), so no pulse is ever
+     * half-shown. "Not yet started" is its own latch (`boot_code_armed`)
+     * rather than a sentinel in the origin -- `timer_read32()` legitimately
+     * returns 0 at MCU start, so a 0 origin is a real time, not "unset", and
+     * conflating the two would leave the matrix dark for the whole window. */
+    boot_code_armed   = true;
     boot_code_active  = true;
     boot_code_done    = false;
 }
@@ -388,8 +394,10 @@ void wls_indicator_boot_code(void) {
     if (!boot_code_active) {
         return;
     }
-    if (boot_code_started == 0) {
+    if (boot_code_armed) {
+        /* Origin not yet stamped: hold black and stamp it now. */
         boot_code_started = timer_read32();
+        boot_code_armed   = false;
         rgb_matrix_set_color_all(0, 0, 0);
         return;
     }

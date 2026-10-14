@@ -23,11 +23,19 @@ uint32_t eeconfig_confinfo_read(void) {
 }
 
 void eeconfig_confinfo_default(void) {
+    /* Every bitfield of the word is set. The `struct` shares one `uint32_t`
+     * with `raw`, so any field left unset is *not* zero -- it is whatever the
+     * previous contents of `confinfo` happened to hold, and `confinfo` may hold
+     * a foreign block (a different firmware's layout) at the moment the version
+     * gate rejects it. Naming all of them makes the default deterministic, which
+     * is the whole point of re-defaulting rather than migrating per field. */
     confinfo.flag               = true;
+    confinfo.devs               = DEVS_USB;
     confinfo.record_channel     = 0;
     confinfo.record_last_mode   = 0xff;
-    confinfo.last_btdevs        = 1;
+    confinfo.last_btdevs        = DEVS_BT1;
     confinfo.dir_flag           = 0;
+    confinfo.filp               = 0;
     confinfo.last_wireless_devs = DEVS_BT1;
     confinfo.version            = CONFINFO_VERSION;
 

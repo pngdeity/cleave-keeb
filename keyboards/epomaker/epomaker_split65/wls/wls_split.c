@@ -28,9 +28,9 @@ bool wls_split_send(uint8_t cmd, const uint8_t body[4]) {
 void master_sync_mms_slave(uint8_t last_mode, uint8_t now_mode, uint8_t reset) {
     const uint8_t body[4] = {last_mode, now_mode, reset, 0};
     if (wls_split_send(WLS_SPLIT_CMD_SYNC_MULTIMODE, body)) {
-        dprintf("Slave Sleep OK1\n");
+        dprintf("sync multimode sent\n");
     } else {
-        dprintf("Slave sync failed1!\n");
+        dprintf("sync multimode failed\n");
     }
 }
 

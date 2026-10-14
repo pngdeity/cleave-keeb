@@ -23,6 +23,12 @@ wls_rgb_key_action_t wls_rgb_key_decide(uint16_t keycode, const wls_rgb_state_t 
                 action.kind = WLS_RGB_KEY_ACK_DIR;
             }
             break;
+        case QK_RGB_MATRIX_MODE_NEXT:
+            if (state->mode == WLS_RGB_MODE_STEP_FROM) {
+                action.kind  = WLS_RGB_KEY_SET_MODE;
+                action.param = WLS_RGB_MODE_STEP_TO;
+            }
+            break;
         case QK_RGB_MATRIX_VALUE_UP:
             /* Always (re)enables the matrix; additionally acknowledges at speed. */
             action.enable = true;

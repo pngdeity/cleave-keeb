@@ -216,24 +216,6 @@ hsm_switch_pos_t hsm_switch_pos_of_mode(uint8_t now_mode) {
     }
 }
 
-hsm_switch_pos_t hsm_switch_pos_of_hs_mode(uint8_t hs_mode) {
-    /* The detector's output vocabulary (`enum modeio_mode`): hs_usb=1, hs_bt=2,
-     * hs_2g4=3. `hs_none`/`hs_wireless`/anything else -> unknown. Note this is a
-     * *different* numbering from `hsm_switch_pos_of_mode`: the pin read uses
-     * 1=BT/2=2.4G/3=USB, the enum uses its declaration order. Keeping the two
-     * named separately is what stops the two vocabularies being conflated. */
-    switch (hs_mode) {
-        case 1: /* hs_usb */
-            return HSM_SWITCH_USB;
-        case 2: /* hs_bt */
-            return HSM_SWITCH_BT;
-        case 3: /* hs_2g4 */
-            return HSM_SWITCH_2G4;
-        default: /* hs_none, hs_wireless, anything else */
-            return HSM_SWITCH_UNKNOWN;
-    }
-}
-
 bool hsm_keycode_allowed(hsm_switch_pos_t pos, uint8_t target_devs) {
     bool target_is_bt  = hsm_devs_is_bt(target_devs);
     bool target_is_2g4 = (target_devs == HSM_DEVS_2G4);
@@ -277,24 +259,6 @@ int16_t hsm_long_press_devs(uint16_t keycode) {
              * matched but deliberately did nothing for). */
             return -1;
     }
-}
-
-uint8_t hsm_seed_btdev(uint8_t current_devs, uint8_t last_bt) {
-    /* On a BT profile the live device index is the sub-selection; otherwise the
-     * switch is not on BT, so fall back to the persisted last BT index (clamped
-     * to the BT range). This is what lets the scan seed from the *live* device
-     * index instead of a RAM mirror of the stored one. */
-    if (hsm_devs_is_bt(current_devs)) {
-        return current_devs;
-    }
-    return hsm_btdev_or(last_bt, HSM_DEVS_BT1);
-}
-
-uint8_t hsm_mode_seed(uint8_t current_devs) {
-    /* The device index *is* the seed the mode scan compares against, so this is
-     * the identity — named so the intent ("seed the edge-detector with the live
-     * authority, never a persisted copy") is explicit and testable. */
-    return current_devs;
 }
 
 /* True when an absolute deadline (`at`, 0 = unarmed) has been reached at `now`.

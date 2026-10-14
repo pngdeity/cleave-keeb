@@ -72,18 +72,20 @@ uint8_t hsm_boot_devs(hsm_switch_pos_t pos, uint8_t last_bt);
  * ------------------------------------------------------------------------- */
 
 /* The connection-host values this core returns, mirroring upstream's
- * `connection_host_t` (AUTO, NONE, USB, BLUETOOTH, 2P4GHZ -- so USB = 3,
- * BLUETOOTH = 4, 2P4GHZ = 5). Exposed so callers and tests share the vocabulary;
- * callers cast the returned `uint8_t` to `connection_host_t`. */
-#define HSM_HOST_USB 3
-#define HSM_HOST_BLUETOOTH 4
-#define HSM_HOST_2P4GHZ 5
+ * `connection_host_t` (AUTO, NONE, USB, BLUETOOTH, 2P4GHZ -- so USB = 2,
+ * BLUETOOTH = 3, 2P4GHZ = 4). Exposed so callers and tests share the vocabulary;
+ * callers cast the returned `uint8_t` to `connection_host_t`, so these MUST stay
+ * equal to the upstream enum: an off-by-one here casts straight into the wrong
+ * host at `wls_transport.c` `connection_set_host_noeeprom()`. */
+#define HSM_HOST_USB 2
+#define HSM_HOST_BLUETOOTH 3
+#define HSM_HOST_2P4GHZ 4
 
 /* The connection host a device index maps onto: USB -> USB, 2.4 GHz -> 2P4GHZ,
  * any BT index (and anything else) -> BLUETOOTH. Values match the firmware's
- * `connection_host_t` so the shell needs no translation. This is the single
- * `devs -> host` mapping the board uses; it existed as three inline copies
- * before (defect 7). */
+ * `connection_host_t` so the shell needs no translation (see the `HSM_HOST_*`
+ * block above). This is the single `devs -> host` mapping the board uses; it
+ * existed as three inline copies before (defect 7). */
 uint8_t hsm_host_of_devs(uint8_t devs);
 
 /* Whether the switch position could actually be read. A pin read taken before
@@ -267,15 +269,6 @@ bool hsm_switch_moved(hsm_switch_pos_t now_pos, hsm_switch_pos_t last_pos, bool 
  * modes the switch does not allow. */
 bool hsm_keycode_allowed(hsm_switch_pos_t pos, uint8_t target_devs);
 
-/* The switch position for the *detector's output* mode (`wls.c`'s modeio_mode:
- * hs_none=0, hs_usb=1, hs_bt=2, hs_2g4=3, hs_wireless=4). Distinct from
- * `hsm_switch_pos_of_mode`, which maps the raw pin read (1=BT, 2=2.4G, 3=USB);
- * the detector's output uses the enum's own numbering, so the two must not be
- * conflated. `hs_wireless` is an input mode the detector never emits, so it maps
- * to UNKNOWN; `hs_none` (pins unreadable) also maps to UNKNOWN, which the rules
- * treat as the forgiving/keep-persisted case. */
-hsm_switch_pos_t hsm_switch_pos_of_hs_mode(uint8_t hs_mode);
-
 /* The device index a wireless keycode re-pairs on a long-press, or -1 when the
  * keycode has no long-press action. Pure: the keycode alone decides the target,
  * so the caller can capture the value at arm time instead of holding a pointer
@@ -288,17 +281,6 @@ int16_t hsm_long_press_devs(uint16_t keycode);
  * authority — rather than kept in a second variable that can desync and then
  * lie in the battery readback. */
 uint8_t hsm_profile_of_devs(uint8_t devs);
-
-/* The BT sub-selection to seed the mode scan with: the current device index when
- * it is already on a BT profile, otherwise the persisted fallback (`last_bt`).
- * This lets callers seed from the *live* authority (`wireless_get_current_devs()`)
- * rather than a RAM mirror of the persisted index. */
-uint8_t hsm_seed_btdev(uint8_t current_devs, uint8_t last_bt);
-
-/* The mode seed for the switch scan, from the live device index. Identity today,
- * but named so the intent ("seed the edge-detector with the live truth, not a
- * persisted copy") is explicit and testable. */
-uint8_t hsm_mode_seed(uint8_t current_devs);
 
 /* ---------------------------------------------------------------------------
  * Link watch: the reconnect/sleep countdowns, as a pure decision.

@@ -102,14 +102,14 @@ TEST(WlsDiag, decode_rejects_null) {
  * the same fields. See `docs/0xA4-golden-vector.md`. */
 TEST(WlsDiag, golden_vector_diag_block_matches_the_host_fixture) {
     /* The diag block of the vector: bytes 11..20 of the report. */
-    static const uint8_t vector_diag[WLS_DIAG_ENC_SIZE] = {0x02, 0x04, 0x04, 0x03, 0x01, 0x02, 0x01, 0x00, 0x01, 0x10};
+    static const uint8_t vector_diag[WLS_DIAG_ENC_SIZE] = {0x02, 0x04, 0x03, 0x03, 0x01, 0x02, 0x01, 0x00, 0x01, 0x10};
 
     wls_diag_t d;
     ASSERT_TRUE(wls_diag_decode(vector_diag, &d));
 
     EXPECT_EQ(0x02, d.switch_pos); // BT
     EXPECT_EQ(0x04, d.devs);       // DEVS_BT4
-    EXPECT_EQ(0x04, d.host);       // BLUETOOTH
+    EXPECT_EQ(0x03, d.host);       // BLUETOOTH (connection_host_t)
     EXPECT_EQ(0x03, d.boot_count);
     EXPECT_EQ(0x01, d.usb_line);
     EXPECT_EQ(0x02, d.link_state); // MD_STATE_CONNECTED

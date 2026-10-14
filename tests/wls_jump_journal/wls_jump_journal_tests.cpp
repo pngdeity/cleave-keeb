@@ -32,8 +32,8 @@ extern "C" {
 
 namespace {
 
-/* The golden vector shared with `host/battery_polybar.py` (report bytes 23..34):
- * presence 1, version 1, generation 9, stage 0, code 0, reset_cause 0x00000010,
+/* The golden vector shared with `host/battery_polybar.py` (report bytes 23..31):
+ * presence 1, version 1, generation 9, stage 0, code 0, reset_cause 0x10,
  * uptime_ms 0x00B4D2 (46354). The host asserts the same literal decodes to these
  * fields; this asserts the encoder produces them. */
 TEST(WlsJumpJournal, golden_vector_journal_block_matches_the_host_fixture) {
@@ -46,13 +46,10 @@ TEST(WlsJumpJournal, golden_vector_journal_block_matches_the_host_fixture) {
     EXPECT_EQ(0x09, out[2]); /* generation */
     EXPECT_EQ(0x00, out[3]); /* stage */
     EXPECT_EQ(0x00, out[4]); /* code */
-    EXPECT_EQ(0x10, out[5]); /* reset_cause LE */
-    EXPECT_EQ(0x00, out[6]);
-    EXPECT_EQ(0x00, out[7]);
+    EXPECT_EQ(0x10, out[5]); /* reset_cause (low byte; a six-bit latch) */
+    EXPECT_EQ(0xD2, out[6]); /* uptime_ms LE */
+    EXPECT_EQ(0xB4, out[7]);
     EXPECT_EQ(0x00, out[8]);
-    EXPECT_EQ(0xD2, out[9]); /* uptime_ms LE */
-    EXPECT_EQ(0xB4, out[10]);
-    EXPECT_EQ(0x00, out[11]);
 }
 
 /* The presence flag is the discriminator: a journal field that does not carry
@@ -71,9 +68,10 @@ TEST(WlsJumpJournal, presence_flag_is_set_only_by_the_magic) {
     EXPECT_EQ(0x00, out[0]);
 }
 
-/* Both 32-bit fields are little-endian, and their byte orders are independent
- * (a swap in one must not be masked by the other). */
-TEST(WlsJumpJournal, both_word_fields_are_little_endian) {
+/* The reset cause is reported as its low byte only (the latch has six bits) and
+ * the uptime as its low three bytes, each little-endian and independent (a swap
+ * in one must not be masked by the other). */
+TEST(WlsJumpJournal, byte_fields_are_little_endian) {
     uint8_t out[WLS_JUMP_JOURNAL_ENC_SIZE] = {0};
 
     wls_jump_journal_encode_parts(WLS_JUMP_JOURNAL_MAGIC, 0x11, 0x22, 0x33, 0x44, 0x11223344u, 0x55667788u, out);
@@ -82,13 +80,10 @@ TEST(WlsJumpJournal, both_word_fields_are_little_endian) {
     EXPECT_EQ(0x22, out[2]);
     EXPECT_EQ(0x33, out[3]);
     EXPECT_EQ(0x44, out[4]);
-    EXPECT_EQ(0x44, out[5]);
-    EXPECT_EQ(0x33, out[6]);
-    EXPECT_EQ(0x22, out[7]);
-    EXPECT_EQ(0x11, out[8]);
-    EXPECT_EQ(0x88, out[9]);
-    EXPECT_EQ(0x77, out[10]);
-    EXPECT_EQ(0x66, out[11]);
+    EXPECT_EQ(0x44, out[5]); /* reset_cause: the low byte */
+    EXPECT_EQ(0x88, out[6]); /* uptime_ms LE */
+    EXPECT_EQ(0x77, out[7]);
+    EXPECT_EQ(0x66, out[8]);
 }
 
 } // namespace

@@ -135,15 +135,18 @@ enum {
 typedef struct {
     bool    master;
     bool    settled;
-    uint8_t host; /* 3=USB,4=BT,5=2.4G; anything else = none */
+    uint8_t host; /* in `WLS_BOOT_HOST_*` (== `HSM_HOST_*`); anything else = none */
 } wls_boot_inputs_t;
 
-/* The transport vocabulary, copied here for the same reason `HSM_DEVS_*` is
- * copied into `transport_logic` -- an include-free core is host-testable. The
- * values match `HSM_HOST_*`; a board-side static assert pins them (F7). */
-#define WLS_BOOT_HOST_USB 3
-#define WLS_BOOT_HOST_BLUETOOTH 4
-#define WLS_BOOT_HOST_2P4GHZ 5
+/* The transport vocabulary. This core is include-free so it is host-testable,
+ * so the values are restated here rather than included; they MUST equal
+ * `HSM_HOST_*` (`transport_logic.h`), which in turn MUST equal upstream's
+ * `connection_host_t` -- the pre-flight a `host` set from `applied.host` depends
+ * on. `boot_code_logic_tests.cpp` pins the numeric values so drift is a test
+ * failure rather than a silent miscompare. */
+#define WLS_BOOT_HOST_USB 2
+#define WLS_BOOT_HOST_BLUETOOTH 3
+#define WLS_BOOT_HOST_2P4GHZ 4
 
 wls_boot_code_t wls_boot_facts(wls_boot_inputs_t in, uint32_t reset_cause, uint32_t boot_count);
 
@@ -174,8 +177,10 @@ wls_boot_code_t wls_boot_code_bootcount(uint8_t boot_count);
  *
  * The cause is a one-hot bitfield, so it is mapped onto a code in this stage:
  * seven amber, then `n` white, where `n` is the bit position + 1 (1..6) for a
- * known cause, or `WLS_BOOT_CODE_MAX_GROUP`-style reserved high value for more
- * than one bit set at once (which should not happen for a single reset). This is
+ * known cause. If more than one bit is set the **lowest set bit wins** (a single
+ * reset normally sets exactly one, so the first named cause is the right
+ * reading); if none of the six bits is set the value maps to
+ * `WLS_BOOT_CODE_MAX_GROUP` ("the latch held something we do not name"). This is
  * a *stage*, so the reader rule is unchanged: amber is the category, white the
  * value.
  *
@@ -190,11 +195,13 @@ wls_boot_code_t wls_boot_code_rstcause(uint32_t rststat_bits);
  * the clamped counts from `wls_boot_code_counts()`. */
 #define WLS_BOOT_CODE_MAX_GROUP 9
 
-/* The (amber, white) counts for a code. Pure. Both are clamped to
+/* The (amber, white) counts for a code. Pure. The white count is clamped to
  * 1..WLS_BOOT_CODE_MAX_GROUP: a group is never zero-length *within* a spoken
  * code, because a zero group is indistinguishable from a missing delimiter --
- * a stage with code 0 therefore reports one white pulse, not none. (The healthy
- * case is `stage == 0`, which is a distinct code, not an empty amber group.) */
+ * a stage with code 0 therefore reports one white pulse, not none. The amber
+ * count is the stage number clamped to 1..9, except that stage 0 (the healthy
+ * case) reports **zero** amber: the healthy code is a distinct code, not an
+ * empty amber group. */
 typedef struct {
     uint8_t amber;
     uint8_t white;
@@ -251,7 +258,11 @@ wls_boot_code_out_t wls_boot_code_at(wls_boot_code_counts_t counts, uint32_t ori
 
 /* --- the host-visible exporter ------------------------------------------- */
 
-/* How many bytes `wls_boot_code_encode()` writes. Two counts, one byte each. */
+/* How many bytes `wls_boot_code_encode()` writes. Two counts, one byte each.
+ *
+ * `out` must be non-NULL and at least this long; the caller owns the bound (the
+ * same contract `wls_diag_encode()` states). There is no length parameter, so a
+ * short buffer is the caller's defect, not a return value. */
 #define WLS_BOOT_CODE_ENC_SIZE 2
 
 /* Encode the counts into `out` (at least WLS_BOOT_CODE_ENC_SIZE bytes) as

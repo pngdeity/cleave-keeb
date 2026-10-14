@@ -75,4 +75,29 @@ TEST(SplitLogic, unknown_command_is_none) {
     EXPECT_EQ(WLS_SPLIT_ACT_NONE, wls_split_decide_slave(0xFF, body).kind);
 }
 
+TEST(SplitLogic, sync_multimode_clamps_a_corrupt_device_index) {
+    /* The body is untrusted wire input: a corrupted byte must not become board
+     * state. 0xFF would otherwise reach `wls_module_devs_change()` and
+     * `hsm_host_of_devs()` -- which maps anything outside DEVS_USB..DEVS_2G4 to
+     * a transport, so 0xFF read as BLUETOOTH. Out of range clamps to USB, the
+     * safe floor (it can neither select a wrong wireless profile nor tear the
+     * USB line down). */
+    const uint8_t corrupt[4] = {0xFF, 0xFF, 0, 0};
+    wls_split_action_t a     = wls_split_decide_slave(0x55, corrupt);
+    EXPECT_EQ(WLS_SPLIT_ACT_SYNC_DEVICE_INDEX, a.kind);
+    EXPECT_EQ(WLS_SPLIT_DEVS_MIN, a.last_devs);
+    EXPECT_EQ(WLS_SPLIT_DEVS_MIN, a.now_devs);
+}
+
+TEST(SplitLogic, sync_multimode_accepts_the_full_device_range) {
+    /* The clamp must not narrow the legitimate range: every index the board
+     * uses round-trips unchanged -- USB (0), BT1..BT5 (1..5), 2.4 GHz (6). */
+    for (uint8_t devs = WLS_SPLIT_DEVS_MIN; devs <= WLS_SPLIT_DEVS_MAX; devs++) {
+        const uint8_t body[4] = {devs, devs, 0, 0};
+        wls_split_action_t a  = wls_split_decide_slave(0x55, body);
+        EXPECT_EQ(devs, a.last_devs);
+        EXPECT_EQ(devs, a.now_devs);
+    }
+}
+
 } // namespace

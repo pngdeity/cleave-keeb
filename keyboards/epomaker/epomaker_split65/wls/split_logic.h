@@ -26,6 +26,15 @@ typedef enum {
     WLS_SPLIT_CMD_RESET_SETTINGS = 0xDD, /* master reset its settings */
 } wls_split_cmd_t;
 
+/* The device-index range the wire may name: `DEVS_USB` (0) through `DEVS_2G4`
+ * (6). The split body is untrusted input -- a corrupted byte must not become
+ * board state, because the index is what the module is told to select and what
+ * `hsm_host_of_devs()` maps to a transport (0xFF would read as BLUETOOTH). The
+ * decision clamps to this range so the *rule* is testable and the shell cannot
+ * be handed an out-of-range index at all. Mirrors `DEVS_USB`..`DEVS_2G4`. */
+#define WLS_SPLIT_DEVS_MIN 0
+#define WLS_SPLIT_DEVS_MAX 6
+
 /* What the slave should do on receiving a command. Exactly one action. */
 typedef enum {
     WLS_SPLIT_ACT_NONE = 0,

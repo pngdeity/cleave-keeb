@@ -140,30 +140,6 @@ TEST_F(TransportLogic, bt_profile_is_a_pure_function_of_the_device_index) {
     }
 }
 
-/* The mode scan seeds from the *live* device index, never a RAM mirror of the
- * persisted one (audit fix 3). `hsm_mode_seed` is the identity by contract, and
- * `hsm_seed_btdev` prefers the live index when it is on a BT profile, falling
- * back to the clamped persisted BT index otherwise. */
-TEST_F(TransportLogic, mode_seed_is_the_live_device_index) {
-    for (uint8_t d = DEVS_USB; d <= DEVS_2G4; d++) {
-        EXPECT_EQ(d, hsm_mode_seed(d));
-    }
-}
-
-TEST_F(TransportLogic, bt_seed_prefers_live_index_and_clamps_fallback) {
-    /* On a BT profile the live index IS the sub-selection. */
-    EXPECT_EQ(DEVS_BT4, hsm_seed_btdev(DEVS_BT4, DEVS_BT2));
-
-    /* Off a BT profile the persisted last-BT index is the fallback. */
-    EXPECT_EQ(DEVS_BT3, hsm_seed_btdev(DEVS_USB, DEVS_BT3));
-    EXPECT_EQ(DEVS_BT5, hsm_seed_btdev(DEVS_2G4, DEVS_BT5));
-
-    /* A corrupt fallback clamps into BT1..5 rather than leaking USB/2.4G. */
-    EXPECT_EQ(DEVS_BT1, hsm_seed_btdev(DEVS_USB, DEVS_USB));
-    EXPECT_EQ(DEVS_BT1, hsm_seed_btdev(DEVS_USB, DEVS_2G4));
-    EXPECT_EQ(DEVS_BT1, hsm_seed_btdev(DEVS_2G4, 0xFF));
-}
-
 /* The link watch has two independent countdowns: a DISCONNECTED link re-pokes
  * the module after `reconnect_timeout`, a CONNECTED link orders sleep after
  * `sleep_timeout`. They must never share a deadline: a value that means "poke"
@@ -455,20 +431,6 @@ TEST_F(TransportLogic, a_forced_read_is_always_an_edge) {
     EXPECT_TRUE(hsm_switch_moved(HSM_SWITCH_UNKNOWN, HSM_SWITCH_UNKNOWN, true));
 }
 
-/* The detector's *output* mode (wls.h `enum modeio_mode`: hs_none=0, hs_usb=1,
- * hs_bt=2, hs_2g4=3, hs_wireless=4) maps onto the canonical position. This is a
- * different numbering from the raw pin read above, so it has its own mapper;
- * `hs_wireless` is an input mode the detector never emits and maps to unknown. */
-TEST_F(TransportLogic, detector_output_mode_maps_to_the_canonical_position) {
-    enum { HS_NONE = 0, HS_USB = 1, HS_BT = 2, HS_2G4 = 3, HS_WIRELESS = 4 };
-    EXPECT_EQ(HSM_SWITCH_USB, hsm_switch_pos_of_hs_mode(HS_USB));
-    EXPECT_EQ(HSM_SWITCH_BT, hsm_switch_pos_of_hs_mode(HS_BT));
-    EXPECT_EQ(HSM_SWITCH_2G4, hsm_switch_pos_of_hs_mode(HS_2G4));
-    EXPECT_EQ(HSM_SWITCH_UNKNOWN, hsm_switch_pos_of_hs_mode(HS_NONE));
-    EXPECT_EQ(HSM_SWITCH_UNKNOWN, hsm_switch_pos_of_hs_mode(HS_WIRELESS));
-    EXPECT_EQ(HSM_SWITCH_UNKNOWN, hsm_switch_pos_of_hs_mode(0xFF));
-}
-
 /* The switch gate, as the board composes it: position (from the detector) plus
  * target. A BT key acts only in the BT position, a 2.4 GHz key only in the
  * 2.4 GHz position, and an unreadable switch is forgiving — the rule the six
@@ -603,7 +565,7 @@ TEST_F(TransportLogic, the_four_call_sites_keep_their_fallbacks) {
     EXPECT_EQ(DEVS_BT1, hsm_boot_devs(HSM_SWITCH_BT, DEVS_USB));      /* site 1: BT1  */
     EXPECT_EQ(DEVS_USB, hsm_boot_devs(HSM_SWITCH_UNKNOWN, DEVS_2G4)); /* site 1: USB  */
     EXPECT_EQ(0, hsm_profile_of_devs(DEVS_2G4));                      /* site 2: none */
-    EXPECT_EQ(DEVS_BT1, hsm_seed_btdev(DEVS_USB, DEVS_2G4));          /* site 3: BT1  */
+    EXPECT_EQ(DEVS_BT1, hsm_btdev_or(DEVS_USB, DEVS_BT1));          /* site 3: BT1  */
 }
 
 /* The EEPROM recovery rule is the same predicate, now host-testable: a persisted

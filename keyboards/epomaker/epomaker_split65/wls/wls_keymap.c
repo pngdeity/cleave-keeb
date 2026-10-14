@@ -114,14 +114,14 @@ uint32_t wls_keymap_long_press(uint32_t trigger_time, void *cb_arg) {
     uint8_t devs = (uint8_t)(uintptr_t)cb_arg;
 
     if (devs >= DEVS_BT1 && devs <= DEVS_BT5) {
-        if (hs_keycode_allowed(devs, confinfo.last_btdevs)) {
+        if (hs_keycode_allowed(devs)) {
             /* Re-pair the profile the driver already owns (14b): select it with
              * reset=true so the module gets CLEAN + devinfo + PAIR. */
             bluetooth_select_profile(devs, true);
             wls_indicate_devs(devs, true);
         }
     } else if (devs == DEVS_2G4) {
-        if (hs_keycode_allowed(devs, confinfo.last_btdevs)) {
+        if (hs_keycode_allowed(devs)) {
             wls_module_devs_change(wls_module_devs(), DEVS_2G4, true);
             wls_indicate_devs(DEVS_2G4, true);
         }
@@ -168,26 +168,26 @@ static bool process_record_wls(uint16_t keycode, keyrecord_t *record) {
 
     switch (keycode) {
         case KC_BT1: {
-            if (hs_keycode_allowed(DEVS_BT1, confinfo.last_btdevs)) {
+            if (hs_keycode_allowed(DEVS_BT1)) {
                 WLS_KEYCODE_EXEC(DEVS_BT1);
                 hs_link_activity();
             }
 
         } break;
         case KC_BT2: {
-            if (hs_keycode_allowed(DEVS_BT2, confinfo.last_btdevs)) {
+            if (hs_keycode_allowed(DEVS_BT2)) {
                 WLS_KEYCODE_EXEC(DEVS_BT2);
                 hs_link_activity();
             }
         } break;
         case KC_BT3: {
-            if (hs_keycode_allowed(DEVS_BT3, confinfo.last_btdevs)) {
+            if (hs_keycode_allowed(DEVS_BT3)) {
                 WLS_KEYCODE_EXEC(DEVS_BT3);
                 hs_link_activity();
             }
         } break;
         case KC_2G4: {
-            if (hs_keycode_allowed(DEVS_2G4, confinfo.last_btdevs)) {
+            if (hs_keycode_allowed(DEVS_2G4)) {
                 WLS_KEYCODE_EXEC(DEVS_2G4);
                 hs_link_activity();
             }
@@ -378,6 +378,7 @@ bool wls_keymap_process_record(uint16_t keycode, keyrecord_t *record) {
         } break;
         case QK_RGB_MATRIX_SPEED_UP:
         case QK_RGB_MATRIX_SPEED_DOWN:
+        case QK_RGB_MATRIX_MODE_NEXT:
         case QK_RGB_MATRIX_VALUE_UP:
         case QK_RGB_MATRIX_VALUE_DOWN: {
             /* The thresholds and the mode step are the pure `wls_rgb_key_decide()`
@@ -399,6 +400,8 @@ bool wls_keymap_process_record(uint16_t keycode, keyrecord_t *record) {
                     }
                     break;
                 case WLS_RGB_KEY_SET_MODE:
+                    rgb_matrix_mode(ra.param);
+                    break;
                 case WLS_RGB_KEY_NONE:
                 default:
                     break;
@@ -407,7 +410,7 @@ bool wls_keymap_process_record(uint16_t keycode, keyrecord_t *record) {
 
         case TO(_BL): {
             if (record->event.pressed) {
-                rgb_matrix_hs_set_remain_time(HS_RGB_BLINK_INDEX_MAC, 0);
+                rgb_matrix_hs_cancel_index(HS_RGB_BLINK_INDEX_MAC);
                 rgb_matrix_hs_indicator_set(HS_RGB_BLINK_INDEX_WIN, (RGB){RGB_WHITE}, 250, 3);
                 if (keymap_is_mac_system()) {
                     set_single_persistent_default_layer(_BL);
@@ -419,7 +422,7 @@ bool wls_keymap_process_record(uint16_t keycode, keyrecord_t *record) {
         } break;
         case TO(_MBL): {
             if (record->event.pressed) {
-                rgb_matrix_hs_set_remain_time(HS_RGB_BLINK_INDEX_WIN, 0);
+                rgb_matrix_hs_cancel_index(HS_RGB_BLINK_INDEX_WIN);
                 rgb_matrix_hs_indicator_set(HS_RGB_BLINK_INDEX_MAC, (RGB){RGB_WHITE}, 250, 3);
                 if (!keymap_is_mac_system()) {
                     set_single_persistent_default_layer(_MBL);
@@ -430,16 +433,6 @@ bool wls_keymap_process_record(uint16_t keycode, keyrecord_t *record) {
             return false;
         } break;
 
-        case QK_RGB_MATRIX_MODE_NEXT: {
-            if (record->event.pressed) {
-                uint8_t mode = rgb_matrix_get_mode();
-                if (mode == 29) {
-                    rgb_matrix_mode(31);
-                    return false;
-                }
-            }
-            return true;
-        } break;
         case KC_LCMD: {
             if (keymap_is_mac_system()) {
                 if (keymap_config.no_gui && !rgbrec_is_started()) {

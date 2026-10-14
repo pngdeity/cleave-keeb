@@ -19,6 +19,15 @@
  * only duplicated this and are deleted. */
 
 static void kb_battery_send(const kb_battery_snapshot_t *snap) {
+    /* The report is assembled by hand into a fixed `RAW_EPSIZE` buffer, so the
+     * last block's end is a hard bound: if any block moves past it the write is a
+     * stack overflow, not a truncated reply. Pin it here (the defect this guard
+     * was added for: the jump journal once overran the report by three bytes).
+     * Each term is the offset of a block plus its own enc size. */
+    _Static_assert(KB_BATTERY_IDX_BOOT_CODE + 2 <= RAW_EPSIZE, "boot-code pair overruns the 0xA4 report");
+    _Static_assert(KB_BATTERY_IDX_DIAG + WLS_DIAG_ENC_SIZE <= RAW_EPSIZE, "diag block overruns the 0xA4 report");
+    _Static_assert(KB_BATTERY_IDX_JUMP + WLS_JUMP_JOURNAL_ENC_SIZE <= RAW_EPSIZE, "jump journal overruns the 0xA4 report");
+
     uint8_t buf[RAW_EPSIZE];
 
     /* Assemble from one consistent sample of the live sources. */

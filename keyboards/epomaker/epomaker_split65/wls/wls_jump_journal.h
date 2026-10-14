@@ -40,12 +40,14 @@ typedef struct {
     uint8_t  stage;       /* `wls_boot_code_t.stage` at the moment of the jump */
     uint8_t  code;        /* `wls_boot_code_t.code` at the moment of the jump */
     uint32_t reset_cause; /* `wls_reset_cause()` bits at the moment of the jump */
-    uint32_t uptime_ms;   /* `timer_read32()` at the moment of the jump */
+    uint32_t uptime_ms;   /* `timer_read32()` at the moment of the jump. The
+                           * wire form is 24 bits (`jump_journal_logic.h`), so
+                           * the top byte is not carried -- a jump inside the
+                           * first ~4.6 hours is exact. */
 } wls_jump_journal_t;
 
-/* How many bytes `wls_jump_journal_encode()` writes (8.., see below). Fixed so
- * the `0xA4` host reader and the firmware share one length. */
-#define WLS_JUMP_JOURNAL_ENC_SIZE 12
+/* The wire length (`WLS_JUMP_JOURNAL_ENC_SIZE`) is owned by
+ * `jump_journal_logic.h`, which this header includes. */
 
 /* The live journal (in `section(".ram0")`). Read-only for callers; written only
  * by `wls_jump_journal_stamp()`. */
@@ -58,7 +60,7 @@ const wls_jump_journal_t *wls_jump_journal(void);
 void wls_jump_journal_stamp(void);
 
 /* Encode the journal into `WLS_JUMP_JOURNAL_ENC_SIZE` bytes at `out`:
- * `[magic?1][version][generation][stage][code][reset_cause x4][uptime_ms x4]`.
+ * `[present][version][generation][stage][code][reset_cause][uptime_ms x3]`.
  * Pure: maps a struct to bytes and decides nothing. The caller passes the live
  * journal (`wls_jump_journal()`) or, in a test, a fixture. */
 void wls_jump_journal_encode(const wls_jump_journal_t *j, uint8_t *out);

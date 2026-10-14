@@ -38,7 +38,7 @@ void wls_indicate_devs(uint8_t new_devs, bool reset);
 void rgb_matrix_hs_indicator_set(uint8_t index, RGB rgb, uint32_t interval, uint8_t times);
 
 /* Cancel any armed flash on `index` (e.g. a pending A/B toast). */
-void rgb_matrix_hs_set_remain_time(uint8_t index, uint8_t remain_time);
+void rgb_matrix_hs_cancel_index(uint8_t index);
 
 /* Cancel the four direction-LED toasts (a threshold ack). */
 void rgb_blink_dir(void);

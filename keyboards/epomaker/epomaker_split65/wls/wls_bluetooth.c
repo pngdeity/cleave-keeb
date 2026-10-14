@@ -201,7 +201,10 @@ void bluetooth_send_nkro(report_nkro_t *report) {
 
     /* The module has no separate NKRO-flag channel, so the collapsed 6KRO
      * keyboard report is sent alongside the NKRO bitmap (as the vendor
-     * wireless_send_nkro does). */
+     * wireless_send_nkro does). The struct is passed directly rather than
+     * copied into a sized buffer, so its size is an implicit contract with
+     * `md_send_kb()` -- pin it. */
+    _Static_assert(sizeof(report_keyboard_t) == MD_SND_CMD_KB_LEN, "report_keyboard_t must match the module's KB frame size");
     md_send_kb((uint8_t *)&temp_report_keyboard);
     md_send_nkro(wls_report_nkro);
 }

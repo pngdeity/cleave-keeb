@@ -177,9 +177,9 @@ void wls_lifecycle_suspend_wakeup_init_user(void) {
     }
 
     if (wls_split_send(WLS_SPLIT_CMD_WAKEUP, NULL)) {
-        dprintf("Slave Sleep OK\n");
+        dprintf("slave wakeup sent\n");
     } else {
-        dprint("Slave sync failed!\n");
+        dprint("slave wakeup failed!\n");
     }
 }
 
@@ -189,9 +189,9 @@ void wls_lifecycle_suspend_power_down_user(void) {
     }
 
     if (wls_split_send(WLS_SPLIT_CMD_POWER_DOWN, NULL)) {
-        dprintf("Slave Sleep OK\n");
+        dprintf("slave power-down sent\n");
     } else {
-        dprint("Slave sync failed!\n");
+        dprint("slave power-down failed!\n");
     }
 }
 
@@ -217,9 +217,9 @@ bool wls_lifecycle_lpwr_allow_presleep(void) {
     if (is_keyboard_master()) {
         const uint8_t body[4] = {wls_sleep_ordered(), 0, 0, 0};
         if (wls_split_send(WLS_SPLIT_CMD_SLEEP, body)) {
-            dprintf("Slave Sleep OK\n");
+            dprintf("slave sleep sent\n");
         } else {
-            dprint("Slave sync failed!\n");
+            dprint("slave sleep failed!\n");
         }
 
         if (wireless_get_current_devs() != DEVS_USB) {
@@ -253,7 +253,7 @@ bool wls_lifecycle_lpwr_allow_presleep(void) {
 }
 
 void wls_lifecycle_lpwr_wakeup(void) {
-    hs_mode_scan(false, hsm_mode_seed(wireless_get_current_devs()), hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
+    hs_mode_scan(false);
 
     /* Rail from its single owner (defect 5). */
     wls_led_rail_apply();
@@ -283,7 +283,7 @@ void wls_lifecycle_wireless_post_task(void) {
         post_init_timer = 0x00;
     }
 #    if defined(HS_BT_DEF_PIN) && defined(HS_2G4_DEF_PIN)
-    hs_mode_scan(false, hsm_mode_seed(wireless_get_current_devs()), hsm_seed_btdev(wireless_get_current_devs(), confinfo.last_btdevs));
+    hs_mode_scan(false);
 #    endif
 }
 
@@ -344,9 +344,9 @@ void wls_reset_settings(wls_reset_cause_t cause) {
             case WLS_RESET_STEP_NOTIFY_PEER:
                 if (is_keyboard_master()) {
                     if (wls_split_send(WLS_SPLIT_CMD_RESET_SETTINGS, NULL)) {
-                        dprintf("Slave Sleep OK\n");
+                        dprintf("slave reset-settings sent\n");
                     } else {
-                        dprintf("Slave sync failed!\n");
+                        dprintf("slave reset-settings failed!\n");
                     }
                 }
                 break;

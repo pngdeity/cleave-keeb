@@ -39,8 +39,6 @@
  * deadline (below), not as a flag re-derived every frame. */
 #define WLS_BAT_SUPPRESS_MS 2000
 
-enum modeio_mode { hs_none = 0, hs_usb, hs_bt, hs_2g4, hs_wireless };
-
 extern bool charging_state;
 extern bool bat_full_flag;
 /* The ordered-sleep flag's single authority: set/clear through the setter,
@@ -48,14 +46,13 @@ extern bool bat_full_flag;
 void wls_order_sleep(bool ordered);
 bool wls_sleep_ordered(void);
 bool hs_rgb_blink_hook(void);
-bool hs_mode_scan(bool update, uint8_t moude, uint8_t lsat_btdev);
+bool hs_mode_scan(bool update);
 /* The switch gate, stated once: may a wireless keycode for `target_devs` act,
- * given the switch position the detector reads? Seeds the detector from the live
- * device index and the persisted BT sub-index `last_bt`, then answers via the
- * pure `hsm_keycode_allowed`. Replaces the six private copies of the
- * seed+detect+predicate idiom in the board glue. */
-bool hs_keycode_allowed(uint8_t target_devs, uint8_t last_bt);
-bool hs_modeio_detection(bool update, uint8_t *mode, uint8_t lsat_btdev);
+ * given the switch position? Answers via the pure `hsm_keycode_allowed` from
+ * `hs_mode_switch_pos()`, the board's one switch read. Replaces the six private
+ * copies of the seed+detect+predicate idiom in the board glue. */
+bool hs_keycode_allowed(uint8_t target_devs);
+bool hs_modeio_detection(bool update);
 
 /* The physical switch position, read from the pins alone (no edge, no persisted
  * state). The one pin read; its meaning is in `transport_logic.c` and the
@@ -100,7 +97,7 @@ uint32_t wls_reset_cause(void);
  * board; `settled` says whether the switch read was readable at all. */
 typedef struct {
     uint8_t switch_pos; /* hsm_switch_pos_t: 0=UNKNOWN,1=USB,2=BT,3=2.4G */
-    uint8_t host;       /* connection host: 3=USB,4=BT,5=2.4G */
+    uint8_t host;       /* connection host: `WLS_BOOT_HOST_*` (== `HSM_HOST_*`) */
     bool    settled;    /* false = the position was unreadable (nothing applied) */
     bool    master;     /* this half's own `is_keyboard_master()` answer at boot */
 } wls_boot_report_t;
@@ -175,8 +172,8 @@ uint8_t bluetooth_get_profile(void);
  * place the board intends to jump (`bootloader_jump()`), survives the reset, and
  * is reported here. It discriminates "our `QK_BOOT` ran" (presence byte set)
  * from "the word appeared with no stamp" (present = 0) — the reading that tells
- * a dispatched `QK_BOOT` from a corrupt-value write or an electrical one. Offset
- * to follow the 2-byte boot code (21..22): 23..34. */
+ * a dispatched `QK_BOOT` from a corrupt-value write or an electrical one. It
+ * ends the report: offset 23 through the last byte (`RAW_EPSIZE - 1`). */
 #define KB_BATTERY_IDX_JUMP 23
 
 /* KB_BATTERY_IDX_CHARGE */

@@ -51,6 +51,17 @@ TEST(RgbKeyLogic, non_rgb_key_is_none) {
     EXPECT_EQ(WLS_RGB_KEY_NONE, wls_rgb_key_decide(KC_A, &s).kind);
 }
 
+TEST(RgbKeyLogic, mode_next_steps_from_the_one_mode_to_its_successor) {
+    wls_rgb_state_t from = state(128, 128, WLS_RGB_MODE_STEP_FROM, true);
+    wls_rgb_state_t other = state(128, 128, 0, true);
+    wls_rgb_key_action_t a = wls_rgb_key_decide(QK_RGB_MATRIX_MODE_NEXT, &from);
+    EXPECT_EQ(WLS_RGB_KEY_SET_MODE, a.kind);
+    EXPECT_EQ(WLS_RGB_MODE_STEP_TO, a.param);
+    EXPECT_EQ(WLS_RGB_KEY_NONE, wls_rgb_key_decide(QK_RGB_MATRIX_MODE_NEXT, &other).kind);
+    wls_rgb_state_t rel = state(128, 128, WLS_RGB_MODE_STEP_FROM, false);
+    EXPECT_EQ(WLS_RGB_KEY_NONE, wls_rgb_key_decide(QK_RGB_MATRIX_MODE_NEXT, &rel).kind);
+}
+
 TEST(RgbKeyLogic, speed_up_acks_at_or_above_the_high_threshold) {
     wls_rgb_state_t hi = state(WLS_RGB_SPEED_HIGH_ACK, 128, 0, true);
     wls_rgb_state_t lo = state(WLS_RGB_SPEED_HIGH_ACK - 1, 128, 0, true);

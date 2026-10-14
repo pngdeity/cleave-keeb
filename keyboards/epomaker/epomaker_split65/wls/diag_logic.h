@@ -34,14 +34,15 @@ typedef struct {
     uint8_t link_state; /* module MD_STATE_* value */
     /* The RAW levels behind `switch_pos`, so the decode can be audited against
      * the physical part instead of trusted. `switch_pos` is `hsm_switch_pos_t`
-     * derived from these two pins; the pins are measured (across boots) to LIE
-     * -- `C14`/`C15` are bridged through ~98 kOhm rather than being an SPDT, so
-     * the part can read a position the knob is not in, and the lie has not even
-     * been stable across boots. Reporting the levels is what turns "the pins
-     * lie" into a specific, repeatable measurement, and it is the fact any
-     * transport-rule change must be based on. `pin_b9` is the settled cable
-     * detect: a real host cable present should read high, and whether it does
-     * decides whether `B9` can be used as a cable hint at all. */
+     * derived from these two pins; the pins are measured to LIE -- a settled read
+     * has returned 2.4 GHz with the switch on USB (the fault `TODO.md` calls the
+     * pin lie, and the one `docs/HARDWARE.md` "the cabled-but-wireless fault"
+     * records), and the lie has not even been stable across boots. Reporting the
+     * levels is what turns "the pins lie" into a specific, repeatable
+     * measurement, and it is the fact any transport-rule change must be based
+     * on. `pin_b9` is the cable-detect read: a real host cable present should
+     * read high, and whether it does decides whether `B9` can be used as a cable
+     * hint at all. */
     uint8_t pin_c14; /* raw HS_BT_DEF_PIN level at gather time */
     uint8_t pin_c15; /* raw HS_2G4_DEF_PIN level at gather time */
     uint8_t pin_b9;  /* raw SPLIT_HAND_PIN (cable detect) level at gather time */
