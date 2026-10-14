@@ -405,16 +405,21 @@ bool lpwr_stop_is_allowed(void) {
      * without ever running lpwr_wakeup_cb(). The half then re-enters STOP with
      * no rail re-raise and no matrix re-init: dark and unresponsive.
      *
-     * DEMONSTRATED ON HARDWARE 2026-10-14 (no longer only predicted): with the
-     * switch on Bluetooth and no host bonded, the module reports
-     * `md state = 3 (DISCONNECTED)`, `hsm_link_watch()` maps that to
-     * HSM_LINK_ACT_SLEEP -> `lpwr_set_timeout_manual(true)` (see below), and the
-     * master — which is NOT USB-exempt on BT — stopped. `lpwr_stop_hook_pre()`
-     * had already lowered the LED rail, so BOTH halves went dark (the right half
-     * has no battery and is powered only by the master; see docs/HARDWARE.md
-     * "The wireless STOP extinguishes both halves"). Flipping the switch to USB
-     * restored the transport but NOT the rail; only a replug recovers it (and the
-     * replug did restore the LEDs on BOTH halves — confirmed 2026-10-14).
+     * NOT DEMONSTRATED. On 2026-10-14 both halves went dark on Bluetooth with no
+     * host, and an earlier version of this comment claimed this path had caused
+     * it. That claim was refuted by analysis: the module reported
+     * `md state = 3 (DISCONNECTED)`, and `hsm_link_watch()` returns
+     * HSM_LINK_ACT_SLEEP only in HSM_LINK_CONNECTED -- and that action does not
+     * call `wls_order_sleep()` anyway, so it cannot make this predicate true. The
+     * low-battery setter (`wls_indicator.c:177-182`) needs `bat_level == 0`, but
+     * `bat_level` is `*md_getp_bat()` = `md_info.bat`, initialised to 100 and
+     * written only by a module reply (`module.c:75,224`). So this predicate was
+     * unreachable in that session, and the dark board had another cause -- the
+     * LED rail is a pure function of the RGB value (`wls_led_rail_apply()`), so
+     * it can drop with no stop at all. See docs/HARDWARE.md "Both halves went dark
+     * on Bluetooth" for the corrected analysis, and docs/METHOD.md
+     * Part II §0 for why the first version of this note was wrong: a mechanism was
+     * written before its gates were checked.
      *
      * This is a policy, not a statement that no wake source is armed — on both
      * paths the master arms its own rows, the mode-switch pins and the cable
