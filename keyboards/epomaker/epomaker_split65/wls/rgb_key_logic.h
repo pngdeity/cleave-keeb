@@ -30,6 +30,22 @@
 #define WLS_RGB_VALUE_UP_ACK_SPEED 120
 /* The value-down key acknowledges at this speed and below. */
 #define WLS_RGB_VALUE_DOWN_ACK_SPEED 30
+
+/* The minimum value the backlight may REST at (X-7).
+ *
+ * The value can otherwise reach zero, and at zero the LED rail is dropped
+ * (`wls_led_rail_apply` keys the rail off `rgb_matrix_get_val() != 0`), so the
+ * board goes dark while it is perfectly alive: the 2026-10-14 dark-board event.
+ * "Intentionally dialled to zero" and "the board is dead" then render
+ * identically, which is X-7's founding prohibition and X-2's "two situations
+ * that look the same but need opposite actions".
+ *
+ * One step of headroom above zero is enough: at `WLS_RGB_VAL_FLOOR` the rail is
+ * still up and the board is visibly, if dimly, alive. The floor is *refused*, not
+ * clamped -- see `WLS_RGB_KEY_FLOOR` below -- because clamping would make the
+ * down key silently stop responding, and "the control did nothing" is a worse
+ * lie than "the control is at its end". */
+#define WLS_RGB_VAL_FLOOR 1
 /* The one mode that steps to another rather than advancing normally. */
 #define WLS_RGB_MODE_STEP_FROM 29
 #define WLS_RGB_MODE_STEP_TO 31
@@ -38,7 +54,7 @@
 typedef enum {
     WLS_RGB_KEY_NONE = 0,  /* nothing to do (or not an RGB keycode) */
     WLS_RGB_KEY_ACK_DIR,   /* flash the four direction LEDs */
-    WLS_RGB_KEY_BLANK_ALL, /* rail apply + blank every LED */
+    WLS_RGB_KEY_FLOOR,     /* refuse the change: the value is already at the floor */
     WLS_RGB_KEY_SET_MODE,  /* jump to `param` */
 } wls_rgb_key_kind_t;
 
@@ -48,13 +64,11 @@ typedef struct {
     bool               enable; /* also rgb_matrix_enable() + rail apply first */
 } wls_rgb_key_action_t;
 
-/* The live RGB state the decision reads. Values, not firmware calls. `val_step`
- * is the matrix's minimum value step (QMK's `RGB_MATRIX_VAL_STEP`), passed in so
- * this core stays free of firmware headers. */
+/* The live RGB state the decision reads. Values, not firmware calls, so this
+ * core stays free of firmware headers. */
 typedef struct {
     uint8_t speed;
     uint8_t val;
-    uint8_t val_step;
     uint8_t mode;
     bool    pressed;
 } wls_rgb_state_t;

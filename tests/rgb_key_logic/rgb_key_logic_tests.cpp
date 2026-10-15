@@ -38,11 +38,10 @@ namespace {
 
 static wls_rgb_state_t state(uint8_t speed, uint8_t val, uint8_t mode, bool pressed) {
     wls_rgb_state_t s;
-    s.speed    = speed;
-    s.val      = val;
-    s.val_step = 16; /* RGB_MATRIX_VAL_STEP */
-    s.mode     = mode;
-    s.pressed  = pressed;
+    s.speed   = speed;
+    s.val     = val;
+    s.mode    = mode;
+    s.pressed = pressed;
     return s;
 }
 
@@ -85,18 +84,33 @@ TEST(RgbKeyLogic, value_up_enables_and_acks_only_at_high_speed) {
     EXPECT_TRUE(wls_rgb_key_decide(QK_RGB_MATRIX_VALUE_UP, &lo).enable);
 }
 
-TEST(RgbKeyLogic, value_down_blanks_at_low_value_else_acks_at_low_speed) {
-    wls_rgb_state_t blank = state(128, 16, 0, true);
-    wls_rgb_state_t ack   = state(WLS_RGB_VALUE_DOWN_ACK_SPEED, 200, 0, true);
-    wls_rgb_state_t none  = state(WLS_RGB_VALUE_DOWN_ACK_SPEED + 1, 200, 0, true);
-    EXPECT_EQ(WLS_RGB_KEY_BLANK_ALL, wls_rgb_key_decide(QK_RGB_MATRIX_VALUE_DOWN, &blank).kind);
+TEST(RgbKeyLogic, value_down_is_refused_at_the_floor_not_applied) {
+    /* At or below the floor the key is refused (X-7): the value must not rest
+     * at zero, because at zero the LED rail drops and the board renders exactly
+     * like a dead one. */
+    wls_rgb_state_t at_floor  = state(128, WLS_RGB_VAL_FLOOR, 0, true);
+    wls_rgb_state_t at_zero   = state(128, 0, 0, true);
+    EXPECT_EQ(WLS_RGB_KEY_FLOOR, wls_rgb_key_decide(QK_RGB_MATRIX_VALUE_DOWN, &at_floor).kind);
+    EXPECT_EQ(WLS_RGB_KEY_FLOOR, wls_rgb_key_decide(QK_RGB_MATRIX_VALUE_DOWN, &at_zero).kind);
+}
+
+TEST(RgbKeyLogic, value_down_still_decrements_above_the_floor) {
+    /* One step above the floor the key is not refused: the decide returns NONE
+     * (the value may move) unless the low-speed acknowledgement applies. */
+    wls_rgb_state_t above = state(WLS_RGB_VALUE_DOWN_ACK_SPEED + 1, WLS_RGB_VAL_FLOOR + 1, 0, true);
+    EXPECT_EQ(WLS_RGB_KEY_NONE, wls_rgb_key_decide(QK_RGB_MATRIX_VALUE_DOWN, &above).kind);
+}
+
+TEST(RgbKeyLogic, value_down_acks_at_low_speed_above_the_floor) {
+    wls_rgb_state_t ack  = state(WLS_RGB_VALUE_DOWN_ACK_SPEED, 200, 0, true);
+    wls_rgb_state_t none = state(WLS_RGB_VALUE_DOWN_ACK_SPEED + 1, 200, 0, true);
     EXPECT_EQ(WLS_RGB_KEY_ACK_DIR, wls_rgb_key_decide(QK_RGB_MATRIX_VALUE_DOWN, &ack).kind);
     EXPECT_EQ(WLS_RGB_KEY_NONE, wls_rgb_key_decide(QK_RGB_MATRIX_VALUE_DOWN, &none).kind);
 }
 
-TEST(RgbKeyLogic, blank_all_takes_precedence_over_the_speed_ack) {
-    wls_rgb_state_t both = state(WLS_RGB_VALUE_DOWN_ACK_SPEED, 16, 0, true);
-    EXPECT_EQ(WLS_RGB_KEY_BLANK_ALL, wls_rgb_key_decide(QK_RGB_MATRIX_VALUE_DOWN, &both).kind);
+TEST(RgbKeyLogic, the_floor_takes_precedence_over_the_speed_ack) {
+    wls_rgb_state_t both = state(WLS_RGB_VALUE_DOWN_ACK_SPEED, WLS_RGB_VAL_FLOOR, 0, true);
+    EXPECT_EQ(WLS_RGB_KEY_FLOOR, wls_rgb_key_decide(QK_RGB_MATRIX_VALUE_DOWN, &both).kind);
 }
 
 TEST(RgbKeyLogic, released_rgb_keys_do_nothing) {

@@ -35,8 +35,17 @@ wls_rgb_key_action_t wls_rgb_key_decide(uint16_t keycode, const wls_rgb_state_t 
             action.kind   = (state->speed >= WLS_RGB_VALUE_UP_ACK_SPEED) ? WLS_RGB_KEY_ACK_DIR : WLS_RGB_KEY_NONE;
             break;
         case QK_RGB_MATRIX_VALUE_DOWN:
-            if (state->val <= state->val_step) {
-                action.kind = WLS_RGB_KEY_BLANK_ALL;
+            /* The floor is refused, not applied. At or below `WLS_RGB_VAL_FLOOR`
+             * the value must not be allowed to rest at zero, because at zero the
+             * LED rail drops and the board renders exactly like a dead one
+             * (X-7). The decider cannot enforce that itself -- only the shell can
+             * stop upstream's `rgb_matrix_decrease_val()` from running -- so this
+             * returns a *refusal* the shell must honour by consuming the record.
+             * The floor takes precedence over the low-speed acknowledgement: one
+             * instruction per keypress, and "do not move" is the one that
+             * matters. */
+            if (state->val <= WLS_RGB_VAL_FLOOR) {
+                action.kind = WLS_RGB_KEY_FLOOR;
             } else if (state->speed <= WLS_RGB_VALUE_DOWN_ACK_SPEED) {
                 action.kind = WLS_RGB_KEY_ACK_DIR;
             }

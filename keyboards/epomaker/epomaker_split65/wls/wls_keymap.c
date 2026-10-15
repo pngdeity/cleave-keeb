@@ -383,8 +383,15 @@ bool wls_keymap_process_record(uint16_t keycode, keyrecord_t *record) {
         case QK_RGB_MATRIX_VALUE_DOWN: {
             /* The thresholds and the mode step are the pure `wls_rgb_key_decide()`
              * (wls/rgb_key_logic); this is only the effect shell. */
-            wls_rgb_state_t      st = {rgb_matrix_get_speed(), rgb_matrix_get_val(), RGB_MATRIX_VAL_STEP, rgb_matrix_get_mode(), record->event.pressed};
+            wls_rgb_state_t      st = {rgb_matrix_get_speed(), rgb_matrix_get_val(), rgb_matrix_get_mode(), record->event.pressed};
             wls_rgb_key_action_t ra = wls_rgb_key_decide(keycode, &st);
+            if (ra.kind == WLS_RGB_KEY_FLOOR) {
+                /* The value is at the floor and must not go lower (X-7). Consume
+                 * the record so upstream's `process_rgb_matrix` never runs
+                 * `rgb_matrix_decrease_val()`: the decider can name the refusal,
+                 * but only this `false` makes it real. */
+                return false;
+            }
             if (ra.enable) {
                 rgb_matrix_enable();
                 wls_led_rail_apply();
@@ -392,12 +399,6 @@ bool wls_keymap_process_record(uint16_t keycode, keyrecord_t *record) {
             switch (ra.kind) {
                 case WLS_RGB_KEY_ACK_DIR:
                     rgb_blink_dir();
-                    break;
-                case WLS_RGB_KEY_BLANK_ALL:
-                    wls_led_rail_apply();
-                    for (uint8_t i = 0; i < RGB_MATRIX_LED_COUNT; i++) {
-                        rgb_matrix_set_color(i, 0, 0, 0);
-                    }
                     break;
                 case WLS_RGB_KEY_SET_MODE:
                     rgb_matrix_mode(ra.param);
