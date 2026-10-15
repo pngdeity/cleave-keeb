@@ -268,6 +268,7 @@ bool rgb_matrix_indicators_advanced_kb(uint8_t led_min, uint8_t led_max) {
     }
 
     wls_indicator_channel_flash();
+    wls_indicator_link_state();
 
     /* While suppressed (post-reset) the battery indicator is hidden; the
      * suppression is a deadline, so it simply expires — no re-arm, no flag to

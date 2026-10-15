@@ -319,6 +319,44 @@ void wls_indicate_devs(uint8_t new_devs, bool reset) {
     }
 }
 
+/* The refused-link cue: a distinct sight for `HSM_LINK_REJECT`.
+ *
+ * Before this, a refused connection was painted as nothing at all -- identical
+ * to an ordinary non-connection -- so a person could not tell "the module
+ * refused" (re-pair, or fix the host's pairing settings) from "wait a moment".
+ * Those need opposite actions, so this is X-2's failure and X-30's general rule
+ * (a carried state is never silently flattened) is the fix.
+ *
+ * What is PROVEN and what is a CHOICE, kept separate on purpose:
+ *  - Proven (source, X-2): REJECT must not share a sight with DISCONNECTED, and
+ *    the cue must not be colour alone (X-9). The core decides *that*; the tests
+ *    pin it.
+ *  - Unmeasured (an opinion, and flagged as one): REJECT has never been observed
+ *    on hardware. The exact sight below -- a dim steady red on the BT-channel
+ *    LEDs -- is a stage-4 UX choice, the same kind `UX-REQUIREMENTS.md` § 0.5
+ *    reserves for the 80% decision, and like the level thresholds it needs a
+ *    person's eye before it is a fact. It is deliberately the *simplest* thing
+ *    that satisfies the requirement: a new, non-motion pattern (X-11) at reduced
+ *    intensity so it is not confused with "nothing painted" (X-10).
+ *
+ * Master-gated, and it paints only on REJECT -- on any other state it leaves the
+ * LEDs to their owners, so it is one more indicator, not a fifth writer. */
+void wls_indicator_link_state(void) {
+    if (!is_keyboard_master()) {
+        return;
+    }
+
+    if (hsm_link_state_of_md((uint8_t)*md_getp_state()) != HSM_LINK_REJECT) {
+        return;
+    }
+
+    RGB dim_red = {0x40, 0x00, 0x00};
+
+    rgb_matrix_set_color(HS_RGB_BLINK_INDEX_BT1, dim_red.r, dim_red.g, dim_red.b);
+    rgb_matrix_set_color(HS_RGB_BLINK_INDEX_BT2, dim_red.r, dim_red.g, dim_red.b);
+    rgb_matrix_set_color(HS_RGB_BLINK_INDEX_BT3, dim_red.r, dim_red.g, dim_red.b);
+}
+
 uint32_t wls_bat_suppress_deadline(void) {
     return bat_suppress_until;
 }

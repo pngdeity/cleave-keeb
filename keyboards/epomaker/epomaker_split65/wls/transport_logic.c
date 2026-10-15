@@ -281,3 +281,43 @@ hsm_link_action_t hsm_link_watch(hsm_link_state_t state, bool state_changed, uin
 bool hsm_should_order_sleep(uint8_t level, bool charging, uint8_t stop_threshold) {
     return !charging && level <= stop_threshold;
 }
+
+hsm_link_cue_t hsm_link_cue_of(hsm_link_state_t state) {
+    /* One arm per carried state, with no `default:` -- so a state added to the
+     * enum fails to compile (`-Wswitch`) rather than falling silently into an
+     * arm that looks fine. That IS the class fix for X-30: the original defect
+     * was a `default:` that swallowed REJECT into an actionless arm. */
+    switch (state) {
+        case HSM_LINK_CONNECTED:
+            return HSM_LINK_CUE_STEADY;
+        case HSM_LINK_PAIRING:
+        case HSM_LINK_DISCONNECTED:
+            return HSM_LINK_CUE_BLINK;
+        case HSM_LINK_NONE:
+        case HSM_LINK_REJECT:
+            return HSM_LINK_CUE_NONE;
+    }
+    /* Unreachable with a complete enum (the switch above is exhaustive and the
+     * trailing return silences `-Wreturn-type`). */
+    return HSM_LINK_CUE_NONE;
+}
+
+hsm_link_state_t hsm_link_state_of_md(uint8_t md_state) {
+    /* The module's MD_STATE_* (module.h): 0 NONE, 1 PAIRING, 2 CONNECTED,
+     * 3 DISCONNECTED, 4 REJECT. Kept as numeric literals so this core does not
+     * include the vendor header; the board's `wls_diag` test pins the values
+     * against the enum, so a drift fails a test rather than lying silently. */
+    switch (md_state) {
+        case 1:
+            return HSM_LINK_PAIRING;
+        case 2:
+            return HSM_LINK_CONNECTED;
+        case 3:
+            return HSM_LINK_DISCONNECTED;
+        case 4:
+            return HSM_LINK_REJECT;
+        case 0:
+        default:
+            return HSM_LINK_NONE;
+    }
+}

@@ -20,6 +20,11 @@
 /* Paint the channel flash if armed (called every RGB frame). */
 void wls_indicator_channel_flash(void);
 
+/* Paint the link-state cue (the refused-link sight), master-gated. Idempotent:
+ * it paints only while the link is REJECT and leaves every other state to its
+ * owner, so it is one more indicator rather than a shared-state writer. */
+void wls_indicator_link_state(void);
+
 /* Paint the battery blink and drive the low-battery sleep order. Master-gated. */
 void wls_indicator_battery(void);
 

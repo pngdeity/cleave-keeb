@@ -321,6 +321,74 @@ typedef struct {
     uint32_t sleep_at;     /* when a CONNECTED link should be ordered to sleep */
 } hsm_link_timers_t;
 
+/* ---------------------------------------------------------------------------
+ * Link-state rendering: every carried state gets a visible cue, as a pure
+ * decision.
+ *
+ * The module reports five link states and this board carries all five (see
+ * `hs_link_state`), but nothing rendered them: `REJECT` -- "the module refused
+ * this connection" -- was folded into the same actionless arm as the start-up
+ * states and painted identically to an ordinary non-connection. That violates
+ * `docs/UX-REQUIREMENTS.md` X-2: "rejected" and "not connected" need OPPOSITE
+ * user actions (re-pair the host / fix its pairing settings vs simply wait or
+ * re-pair), so a person cannot tell which to do. X-30 states the general rule
+ * this file encodes against: a state the firmware carries is never silently
+ * flattened.
+ *
+ * This is a *render* decision, not an action: the watch (above) decides what to
+ * DO this tick, this decides what the problem is SHOWN as. Reject deliberately
+ * keeps no action -- poking a module that just refused would be the livelock
+ * shape ("does this effect feed back into its own trigger?"), and inventing a
+ * recovery is outside "stop flattening".
+ *
+ * `wls_blink_t` is not reused here as a type; the cue is a static style the
+ * shell paints continuously, so there is nothing to tick. Constrained by
+ * X-9 (never colour alone) and X-11 (do not reuse an existing pattern with a
+ * new meaning): every state below carries a *pattern* -- steady, no-paint, or
+ * blink -- and where two states must be told apart they differ in more than
+ * hue. */
+typedef enum {
+    /* Nothing painted: no link is being attempted (no link machine active, or
+     * the module refused -- see the state map below). */
+    HSM_LINK_CUE_NONE = 0,
+    /* A bounded presence blink: a link is in progress and will resolve. */
+    HSM_LINK_CUE_BLINK,
+    /* A steady indicator: the state is settled, nothing is owed. */
+    HSM_LINK_CUE_STEADY,
+} hsm_link_cue_t;
+
+/* The cue a link state is shown as. Pure: the shell paints what this returns
+ * and holds no policy.
+ *
+ * The state map, stated so each is deliberate:
+ *   NONE         -> NONE    no link machine is active; nothing is in progress.
+ *   PAIRING      -> BLINK   an attempt is running and will resolve.
+ *   CONNECTED    -> STEADY  settled.
+ *   DISCONNECTED -> BLINK   the watch is already re-poking; the blink says so.
+ *   REJECT       -> NONE    terminal until the person acts, and deliberately
+ *                           NOT the DISCONNECTED blink: the whole point of
+ *                           X-30 is that these two are never the same sight.
+ *
+ * The `NONE` cue is "nothing painted", which is a *reduction*, so it would still
+ * be indistinguishable from a board whose indicator pass never ran. X-10's
+ * "off/unavailable states are shown dim/dark-in-pattern, never absent" is
+ * therefore owed as well: the shell paints REJECT/NONE as the *dim* form (a
+ * low-intensity steady frame), not as nothing at all, so "deliberately quiescent"
+ * and "not painted" are not the same picture. That is the shell's job -- the
+ * core can only say which of the three shapes applies. */
+hsm_link_cue_t hsm_link_cue_of(hsm_link_state_t state);
+
+/* The module's own link-state value (its `MD_STATE_*`, 0..4) mapped onto this
+ * core's enum. Takes the raw numeric value so this header stays free of the
+ * firmware include graph. This is the ONE map: the watch's shell and the
+ * indicator both resolve through it, so a state cannot be mapped two ways.
+ *
+ * Declared here because the two callers are different translation units
+ * (`wls.c` supplies it to the watch; `wls_indicator.c` supplies it to the
+ * render) -- the shared rule is the point, and duplicating it is the defect
+ * class (defect 7: one rule written N times). */
+hsm_link_state_t hsm_link_state_of_md(uint8_t md_state);
+
 /* Advance the link watch by one tick.
  *
  * `now` is the current time in the caller's units (e.g. `timer_read32()`).

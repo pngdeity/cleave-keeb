@@ -270,21 +270,11 @@ bool hs_keycode_allowed(uint8_t target_devs) {
     return hsm_keycode_allowed(hs_mode_switch_pos(), target_devs);
 }
 
-/* Map the module's MD_STATE_* onto the pure core's link-state enum. */
+/* Map the module's MD_STATE_* onto the pure core's link-state enum. The map
+ * itself is `hsm_link_state_of_md` -- one rule, because the indicator needs the
+ * same answer for the render and two copies is the defect class (defect 7). */
 static hsm_link_state_t hs_link_state(void) {
-    switch (*md_getp_state()) {
-        case MD_STATE_PAIRING:
-            return HSM_LINK_PAIRING;
-        case MD_STATE_CONNECTED:
-            return HSM_LINK_CONNECTED;
-        case MD_STATE_DISCONNECTED:
-            return HSM_LINK_DISCONNECTED;
-        case MD_STATE_REJECT:
-            return HSM_LINK_REJECT;
-        case MD_STATE_NONE:
-        default:
-            return HSM_LINK_NONE;
-    }
+    return hsm_link_state_of_md((uint8_t)*md_getp_state());
 }
 
 /* Restart the active link countdown from now (an activity event). The policy is

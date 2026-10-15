@@ -574,3 +574,57 @@ TEST_F(TransportLogic, confinfo_redefaults_on_a_version_change) {
 TEST_F(TransportLogic, confinfo_survives_a_matching_version) {
     EXPECT_FALSE(hsm_confinfo_needs_default(0x1234, 1, 1));
 }
+
+/* --- link-state rendering: the X-30 "never silently flattened" rule ---
+ *
+ * The defect this pins: the module reports five link states, the board carries
+ * all five, but the render folded REJECT into the same sight as an ordinary
+ * non-connection. "Rejected" and "not connected" need opposite user actions
+ * (X-2), so every carried state must have a deliberate cue and no two states
+ * that need different actions may share a look. The vectors below assert the
+ * whole map, so a state can neither be dropped nor collapsed by a later edit.
+ */
+
+TEST_F(TransportLogic, every_carried_link_state_has_a_deliberate_cue) {
+    /* Each state is answered; none is left to a fall-through. */
+    EXPECT_EQ(HSM_LINK_CUE_STEADY, hsm_link_cue_of(HSM_LINK_CONNECTED));
+    EXPECT_EQ(HSM_LINK_CUE_BLINK, hsm_link_cue_of(HSM_LINK_PAIRING));
+    EXPECT_EQ(HSM_LINK_CUE_BLINK, hsm_link_cue_of(HSM_LINK_DISCONNECTED));
+    EXPECT_EQ(HSM_LINK_CUE_NONE, hsm_link_cue_of(HSM_LINK_NONE));
+    EXPECT_EQ(HSM_LINK_CUE_NONE, hsm_link_cue_of(HSM_LINK_REJECT));
+}
+
+/* The one distinction X-30 exists for: a refused connection must not look like
+ * one that is merely disconnected. If a refactor ever maps both to the same
+ * cue, this fails. */
+TEST_F(TransportLogic, rejected_does_not_look_like_disconnected) {
+    EXPECT_NE(hsm_link_cue_of(HSM_LINK_REJECT), hsm_link_cue_of(HSM_LINK_DISCONNECTED));
+}
+
+/* A settled link must be distinguishable from every unsettled one (the other
+ * half of "no two states needing different actions share a look"). */
+TEST_F(TransportLogic, connected_is_distinct_from_every_unsettled_state) {
+    hsm_link_cue_t connected = hsm_link_cue_of(HSM_LINK_CONNECTED);
+    EXPECT_NE(connected, hsm_link_cue_of(HSM_LINK_NONE));
+    EXPECT_NE(connected, hsm_link_cue_of(HSM_LINK_PAIRING));
+    EXPECT_NE(connected, hsm_link_cue_of(HSM_LINK_DISCONNECTED));
+    EXPECT_NE(connected, hsm_link_cue_of(HSM_LINK_REJECT));
+}
+
+/* The module-number map is the ONE map (both the watch's shell and the
+ * indicator resolve through it), so its numerics are pinned here against
+ * `module.h`'s MD_STATE_* literals: 0 NONE, 1 PAIRING, 2 CONNECTED,
+ * 3 DISCONNECTED, 4 REJECT. A vendor renumber fails this rather than silently
+ * rendering the wrong cue. */
+TEST_F(TransportLogic, md_state_numbers_map_to_the_core_states) {
+    EXPECT_EQ(HSM_LINK_NONE, hsm_link_state_of_md(0));
+    EXPECT_EQ(HSM_LINK_PAIRING, hsm_link_state_of_md(1));
+    EXPECT_EQ(HSM_LINK_CONNECTED, hsm_link_state_of_md(2));
+    EXPECT_EQ(HSM_LINK_DISCONNECTED, hsm_link_state_of_md(3));
+    EXPECT_EQ(HSM_LINK_REJECT, hsm_link_state_of_md(4));
+
+    /* An out-of-range value is not a state: it falls to NONE, never to a
+     * convincing-looking link. */
+    EXPECT_EQ(HSM_LINK_NONE, hsm_link_state_of_md(5));
+    EXPECT_EQ(HSM_LINK_NONE, hsm_link_state_of_md(0xFF));
+}
