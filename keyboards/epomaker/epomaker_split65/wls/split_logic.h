@@ -120,3 +120,46 @@ wls_sleep_order_t wls_sleep_order_open(bool sends_wake_on_this_transport, uint8_
 /* Whether the handle permits the order. Reads only what the open decided: the
  * answer cannot drift from the transport fact the handle was built from. */
 bool wls_sleep_order_permitted(const wls_sleep_order_t *order);
+
+/* ---------------------------------------------------------------------------
+ * The order's LIVENESS: a permitted order must be released in bounded time.
+ *
+ * The executor above gives the slave's sleep order a SAFETY home -- an order
+ * whose release is unreachable cannot be constructed. It says nothing about the
+ * other half of a liveness property: an order that IS permitted may still be
+ * sent and never released, and nothing above notices. A half that sent 0xAA is
+ * dark until the 0xCC release arrives; if the transport it was ordered under
+ * changes before that, the release is skipped (0xCC returns early on USB) and
+ * the slave is stranded exactly as in the safety case, one step later.
+ *
+ * This is the liveness counterpart, and it must be stated differently, because
+ * liveness is a property of TIME, not of a construction. The fact the master
+ * holds is: the moment it last sent an order, and the release the order
+ * depended on. The fault is an order outstanding past the point where the
+ * release it waited for can still arrive. `wls_sleep_order_released()` is that
+ * fact as a pure decision over (sent-at, now, the release the order depended
+ * on, whether that release is now taken).
+ *
+ * The deadline exists because the master CANNOT see the slave (the RPC is
+ * request/response; `slave_to_master_t` carries no persistent slave state), so
+ * "the slave is asleep" is unobservable from here -- only "we ordered it and
+ * have not released it for longer than the transport allows" is observable.
+ * ------------------------------------------------------------------------- */
+
+/* How long an order may stay outstanding before it is a fault. An order and its
+ * release happen within one low-power cycle; this is the ceiling on that cycle,
+ * so an order still outstanding after it means the release was skipped, not
+ * merely late. */
+#define WLS_SLEEP_ORDER_RELEASE_MS 120000
+
+/* Whether an order outstanding since `sent_at_ms` should by now have been
+ * released, given the release facts. `now_ms` is the current time.
+ * `release_transport_still_carries` is whether the transport the order was sent
+ * under still sends 0xCC (the release reachable at open). `released` is whether
+ * the release has since been observed.
+ *
+ * True means: the order is a LIVENESS FAULT -- it has outlived its release and
+ * the release cannot still be coming on that transport. False means the order is
+ * either already released, or still within the window, or on a transport whose
+ * release may yet arrive. Pure: no I/O, no firmware state. */
+bool wls_sleep_order_outlived_release(uint32_t sent_at_ms, uint32_t now_ms, bool release_transport_still_carries, bool released);

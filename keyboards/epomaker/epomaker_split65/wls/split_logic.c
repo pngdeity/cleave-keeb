@@ -66,3 +66,18 @@ wls_sleep_order_t wls_sleep_order_open(bool sends_wake_on_this_transport, uint8_
 bool wls_sleep_order_permitted(const wls_sleep_order_t *order) {
     return order != NULL && order->permitted;
 }
+
+bool wls_sleep_order_outlived_release(uint32_t sent_at_ms, uint32_t now_ms, bool release_transport_still_carries, bool released) {
+    /* The liveness counterpart of the executor's safety precondition. A released
+     * order is not outstanding; an order within the window may still be
+     * released; and an order whose transport can still carry the release is
+     * still releasable -- none of those is a fault. The fault is only the
+     * residue: not released, window elapsed, and no release can come. */
+    if (released) {
+        return false;
+    }
+    if (release_transport_still_carries) {
+        return false;
+    }
+    return (uint32_t)(now_ms - sent_at_ms) >= WLS_SLEEP_ORDER_RELEASE_MS;
+}

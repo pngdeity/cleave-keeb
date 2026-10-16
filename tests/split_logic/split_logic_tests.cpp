@@ -183,4 +183,68 @@ TEST(SplitLogic, a_null_executor_is_never_permitted) {
     EXPECT_FALSE(wls_sleep_order_permitted(NULL));
 }
 
+/* --- D1: the order's liveness, the safety rung's missing twin -----------------
+ *
+ * The executor gives the order a SAFETY home (an unreachable release cannot be
+ * constructed). Nothing asserted the liveness half: an order that IS permitted
+ * can still be sent and never released, and the master cannot see the slave to
+ * notice. `wls_sleep_order_outlived_release()` is the observable form of that
+ * fault -- an order outstanding past the point its release can still arrive.
+ * These vectors pin the four cases. */
+
+TEST(SplitLogic, a_released_order_is_not_outstanding) {
+    /* The release arrived: the order is done, no matter how long ago it was
+     * sent or what the transport now is. */
+    EXPECT_FALSE(wls_sleep_order_outlived_release(/*sent=*/0, /*now=*/WLS_SLEEP_ORDER_RELEASE_MS * 4,
+                                                  /*release_reachable=*/false, /*released=*/true));
+}
+
+TEST(SplitLogic, an_order_within_the_window_is_not_yet_a_fault) {
+    /* The window is the ceiling on one low-power cycle; inside it the release
+     * may still be coming, so it is not yet a fault. */
+    EXPECT_FALSE(wls_sleep_order_outlived_release(/*sent=*/1000, /*now=*/1000 + WLS_SLEEP_ORDER_RELEASE_MS - 1,
+                                                  /*release_reachable=*/false, /*released=*/false));
+}
+
+TEST(SplitLogic, an_order_on_a_transport_that_still_carries_the_release_is_not_stranded) {
+    /* The transport the order was sent under still sends 0xCC, so the release
+     * can still arrive however long the order has been outstanding. Not a
+     * fault -- this is the difference from the SAFETY case, which forbids
+     * opening such an order at all. */
+    EXPECT_FALSE(wls_sleep_order_outlived_release(/*sent=*/0, /*now=*/WLS_SLEEP_ORDER_RELEASE_MS * 10,
+                                                  /*release_reachable=*/true, /*released=*/false));
+}
+
+TEST(SplitLogic, an_order_outliving_an_unreachable_release_is_the_fault) {
+    /* Not released, past the window, and the transport no longer carries the
+     * release: exactly the stranded-slave shape, now observable on the master. */
+    EXPECT_TRUE(wls_sleep_order_outlived_release(/*sent=*/0, /*now=*/WLS_SLEEP_ORDER_RELEASE_MS,
+                                                 /*release_reachable=*/false, /*released=*/false));
+}
+
+TEST(SplitLogic, the_liveness_boundary_is_exactly_the_deadline) {
+    /* The transition is at the deadline, not around it: one ms before is a
+     * non-fault, at the deadline is the fault. Wrapping is handled by the
+     * unsigned subtraction, so a deadline crossing the 32-bit wrap is not
+     * mistaken for a fault (sent near the top, now small). */
+    EXPECT_FALSE(wls_sleep_order_outlived_release(0, WLS_SLEEP_ORDER_RELEASE_MS - 1, false, false));
+    EXPECT_TRUE(wls_sleep_order_outlived_release(0, WLS_SLEEP_ORDER_RELEASE_MS, false, false));
+
+    uint32_t near_wrap = 0xFFFFFFFFu - (WLS_SLEEP_ORDER_RELEASE_MS / 2);
+    EXPECT_FALSE(wls_sleep_order_outlived_release(near_wrap, near_wrap + (WLS_SLEEP_ORDER_RELEASE_MS / 2), false, false));
+}
+
+TEST(SplitLogic, liveness_and_safety_are_different_facts_about_the_same_order) {
+    /* The two halves are independent, which is why both are needed: a handle
+     * can be PERMITTED (release reachable at open) and thereafter outlive it
+     * (the transport changed), so safety holding at t0 does not imply liveness
+     * at t1. Conversely an unpermitted handle never becomes an outstanding
+     * order at all. */
+    wls_sleep_order_t permitted = wls_sleep_order_open(/*sends_wake=*/true, 1);
+    EXPECT_TRUE(wls_sleep_order_permitted(&permitted));
+    /* ...and yet, sent, then the transport leaves USB-suppression: the release
+     * cannot come, so it outlives. */
+    EXPECT_TRUE(wls_sleep_order_outlived_release(0, WLS_SLEEP_ORDER_RELEASE_MS, /*release_reachable=*/false, /*released=*/false));
+}
+
 } // namespace
