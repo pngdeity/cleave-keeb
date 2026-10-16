@@ -93,3 +93,24 @@ wls_bat_action_t wls_bat_action_of(bool charging, bool full, uint8_t level, bool
     }
     return WLS_BAT_ACT_NONE;
 }
+
+bool wls_frame_owner_is_exclusive(wls_frame_owner_t owner) {
+    /* Today only the boot code is exclusive. Kept as a switch over the enum
+     * rather than `owner == BOOT_CODE` so adding a second exclusive owner is a
+     * decision made here, in the core, with the tests that pin it -- not a
+     * silent property of a new enum value. */
+    switch (owner) {
+        case WLS_FRAME_OWNER_BOOT_CODE:
+            return true;
+        case WLS_FRAME_OWNER_NONE:
+        default:
+            return false;
+    }
+}
+
+wls_frame_owner_t wls_frame_owner_of(bool exclusive_claim_live) {
+    /* The arbiter sees only the exclusive claim, because an exclusive owner is
+     * exactly what suppresses the rest. A non-exclusive painter never needs to
+     * be arbitrated: it composes with its siblings by painting its own LEDs. */
+    return exclusive_claim_live ? WLS_FRAME_OWNER_BOOT_CODE : WLS_FRAME_OWNER_NONE;
+}

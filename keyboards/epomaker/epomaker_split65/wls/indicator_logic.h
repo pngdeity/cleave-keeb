@@ -100,3 +100,59 @@ typedef enum {
  * host's/IM's charge-request flag, and `low` is the level at or below which the
  * warning blink applies. Returns the action the shell should apply. Pure. */
 wls_bat_action_t wls_bat_action_of(bool charging, bool full, uint8_t level, bool request, uint8_t low);
+
+/* --- frame ownership: which painter owns a frame, and what ends the claim ----
+ *
+ * Every indicator painter writes into the SAME matrix buffer in the SAME frame
+ * pass, so "who is showing" is not a property of any painter -- it is a property
+ * of the ORDER they run in. That order was the frame pass itself
+ * (`rgb_matrix_indicators_advanced_kb`), with ownership expressed positionally:
+ * the boot code claims the frame and the pass `return true`s early, so every
+ * painter written after that line is silently suppressed and every painter
+ * written before it silently overwrites the code. Nothing failed when either
+ * happened, which is the whole defect class (docs/FINDINGS.md): a relation
+ * between decisions, owned by no file.
+ *
+ * The rule, stated once and computed here:
+ *
+ *   1. **Exclusive owners suppress everything.** The boot code is an exclusive
+ *      owner: while it plays, no other painter may write, because it is the one
+ *      instrument that must be readable with the USB line down.
+ *   2. **An exclusive claim ends by a FACT, not by a painter.** The claim is
+ *      over when its deadline passes or a key dismisses it -- both readable
+ *      without any paint function running. A claim whose only exit is a call the
+ *      claim itself suppresses can never end (the §7 latent hazard, `TODO.md` §7).
+ *   3. **Non-exclusive painters compose.** They paint in the pass's order and
+ *      each covers its own LEDs; none of them owns the frame.
+ *
+ * This type is the claim; `wls_frame_owner_of()` is the arbitration. The shell
+ * paints `owner` only when the arbiter permits, and the ordering above stops
+ * being a positional accident in the pass. */
+
+/* The painters, in precedence order, highest first. The ORDER IS THE POLICY: it
+ * is the same order the frame pass ran them in, restated here so it exists once
+ * and a reader does not have to reconstruct arbitration from call order.
+ * `WLS_FRAME_OWNER_NONE` means no painter owns this frame. */
+typedef enum {
+    WLS_FRAME_OWNER_NONE = 0,
+    WLS_FRAME_OWNER_BOOT_CODE, /* exclusive: the boot diagnostic code */
+    /* Non-exclusive painters, in pass order, follow here as they are given
+     * claims. Until then they are covered by the shell's own order. */
+} wls_frame_owner_t;
+
+/* Whether a painter owns a frame exclusively (suppresses all others). */
+bool wls_frame_owner_is_exclusive(wls_frame_owner_t owner);
+
+/* The arbitration: given that the exclusive owner's claim is live or not, which
+ * owner paints this frame.
+ *
+ * `exclusive_claim_live` is a FACT the caller can evaluate without painting --
+ * for the boot code it is `wls_indicator_boot_code_owns_matrix()`, which the §7
+ * fix made compute its own deadline. Passing the fact rather than the painter
+ * is the point: the claim's liveness is decided before any paint runs, so a
+ * suppressed pass cannot keep a claim alive that only painting would end.
+ *
+ * Returns `WLS_FRAME_OWNER_BOOT_CODE` while the claim is live (the caller paints
+ * the code and nothing else), else `WLS_FRAME_OWNER_NONE` (the caller runs the
+ * rest of the pass). Pure. */
+wls_frame_owner_t wls_frame_owner_of(bool exclusive_claim_live);

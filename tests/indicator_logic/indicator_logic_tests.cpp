@@ -148,4 +148,37 @@ TEST(IndicatorLogic, battery_action_follows_the_replaced_branch) {
     EXPECT_EQ(WLS_BAT_ACT_PAINT_GREEN, wls_bat_action_of(true, false, 0, true, LOW));
 }
 
+/* Frame ownership (artefact 2). The arbitration used to be positional -- the
+ * frame pass returned early at the line after the boot code -- so the rule was
+ * the line number and any painter moved across it changed ownership silently.
+ * These vectors pin the rule itself: the boot code is exclusive, and the
+ * exclusivity is decided from a fact the caller can evaluate without painting. */
+TEST(IndicatorLogic, the_boot_code_owns_the_frame_exclusively) {
+    EXPECT_TRUE(wls_frame_owner_is_exclusive(WLS_FRAME_OWNER_BOOT_CODE));
+}
+
+TEST(IndicatorLogic, no_owner_is_not_exclusive) {
+    /* "No owner" must not suppress anything -- if it did, the whole pass after
+     * the boot code would be unreachable permanently. */
+    EXPECT_FALSE(wls_frame_owner_is_exclusive(WLS_FRAME_OWNER_NONE));
+}
+
+TEST(IndicatorLogic, a_live_exclusive_claim_owns_the_frame) {
+    EXPECT_EQ(WLS_FRAME_OWNER_BOOT_CODE, wls_frame_owner_of(/*exclusive_claim_live=*/true));
+}
+
+TEST(IndicatorLogic, a_cleared_claim_leaves_the_frame_to_the_rest_of_the_pass) {
+    EXPECT_EQ(WLS_FRAME_OWNER_NONE, wls_frame_owner_of(/*exclusive_claim_live=*/false));
+}
+
+TEST(IndicatorLogic, only_an_exclusive_owner_suppresses_the_frame) {
+    /* The property the shell relies on: the pass suppresses the rest exactly
+     * when the arbiter names an exclusive owner. Composed the way the pass
+     * composes it, so the shell's `return true` cannot drift from the rule. */
+    wls_frame_owner_t boot = wls_frame_owner_of(true);
+    wls_frame_owner_t none = wls_frame_owner_of(false);
+    EXPECT_TRUE(wls_frame_owner_is_exclusive(boot));
+    EXPECT_FALSE(wls_frame_owner_is_exclusive(none));
+}
+
 } // namespace

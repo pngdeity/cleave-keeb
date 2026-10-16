@@ -263,7 +263,14 @@ bool rgb_matrix_indicators_advanced_kb(uint8_t led_min, uint8_t led_max) {
      * is idempotent, so calling it on the first paint arms exactly once. */
     wls_indicator_boot_code_start();
     wls_indicator_boot_code();
-    if (wls_indicator_boot_code_owns_matrix()) {
+    /* Frame ownership is arbitrated in the core (`wls_frame_owner_of`), not by
+     * where this `return` happens to sit. The claim's liveness is a fact the
+     * predicate computes from the clock, so the suppression ends whether or not
+     * this pass ran -- a pass starved by its own suppression can still release
+     * it. Any painter added below is suppressed automatically while the code
+     * plays, which is the same visible behaviour as the positional return, but
+     * the rule now has a home instead of being the line's line number. */
+    if (wls_frame_owner_is_exclusive(wls_frame_owner_of(wls_indicator_boot_code_owns_matrix()))) {
         return true;
     }
 
