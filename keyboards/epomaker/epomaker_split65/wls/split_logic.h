@@ -122,6 +122,52 @@ wls_sleep_order_t wls_sleep_order_open(bool sends_wake_on_this_transport, uint8_
 bool wls_sleep_order_permitted(const wls_sleep_order_t *order);
 
 /* ---------------------------------------------------------------------------
+ * The release SENDER: the same precondition, on the command that releases.
+ *
+ * The executor above constrains the order (0xAA). Nothing constrained the
+ * release (0xCC): its one call site was a bare `if (wireless_get_current_devs()
+ * == DEVS_USB) return;` -- a convention, exactly the shape the executor was
+ * built to remove, and the same class of hole one step along: the safety
+ * argument (S2 rung 3) reasons about the order being unconstructible, and
+ * silently assumes the release is sent whenever it is reachable. That assumption
+ * is a separate fact with no home, so a later edit could put the early return
+ * somewhere else -- or drop it -- and the executor's premise would quietly stop
+ * holding with nothing failing.
+ *
+ * So the release gets the same treatment and the same name (`wls_sleep_order_t`,
+ * because it is the same order seen from the other end): `wls_sleep_release_open()`
+ * returns a handle that is permitted ONLY when the release is actually sent on
+ * the transport the caller is on now, and the caller sends only if the handle
+ * permits. The two opens take the SAME fact, derived the same way
+ * (`wireless_get_current_devs() != DEVS_USB`), so the pair cannot disagree: the
+ * transport that may not order is exactly the transport that may not release.
+ *
+ * The pair relays LED-rail power to the slave, so both are gated together -- a
+ * release the master skips while cabled would extinguish the slave's backlight
+ * (the rail must stay up on both halves while cabled), which is why "may not
+ * release" is a real rule and not merely a redundant guard.
+ * ------------------------------------------------------------------------- */
+
+/* Open a release handle for the transport the master is on NOW.
+ * `sends_release_on_this_transport` is the same fact the order executor takes,
+ * from the same derivation. `permitted` is exactly that fact, so a caller can
+ * neither forget the check nor defeat it. Pure. */
+wls_sleep_order_t wls_sleep_release_open(bool sends_release_on_this_transport);
+
+/* Whether the handle permits the release. The same reading as
+ * `wls_sleep_order_permitted()` -- one answer for one handle on either side --
+ * kept under its own name so a reader at a release site sees the release's rule. */
+bool wls_sleep_release_permitted(const wls_sleep_order_t *release);
+
+/* Whether the master may send a relay command (0xCC wake / 0xBB power-down) on
+ * this transport at all. The rule in words: on USB the pair is never sent, so
+ * the slave's rail is never relayed and its backlight is never extinguished by a
+ * release it did not need. The handle above is this rule as a precondition;
+ * this form exists beside `wls_split_can_order_sleep()` so both sides of the
+ * contract read the same way. Pure. */
+bool wls_split_can_send_relay(bool sends_release_on_this_transport);
+
+/* ---------------------------------------------------------------------------
  * The order's LIVENESS: a permitted order must be released in bounded time.
  *
  * The executor above gives the slave's sleep order a SAFETY home -- an order

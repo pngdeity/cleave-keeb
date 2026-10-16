@@ -183,6 +183,56 @@ TEST(SplitLogic, a_null_executor_is_never_permitted) {
     EXPECT_FALSE(wls_sleep_order_permitted(NULL));
 }
 
+/* --- D2: the release SENDER, the executor's other end ------------------------
+ *
+ * The executor constrains the order (0xAA). Nothing constrained the release
+ * (0xCC): its one call site was a bare `if (on USB) return;`, the same
+ * convention-not-precondition shape the executor removed, one step along. The
+ * safety argument (S2 rung 3) silently assumes the release is sent whenever it
+ * is reachable, and that assumption had no home. These vectors pin the release
+ * handle, and pin that the two endpoints cannot disagree. */
+
+TEST(SplitLogic, the_release_handle_is_unpermitted_while_cabled) {
+    /* On USB the pair must not be broadcast: the rail must stay up on both
+     * halves. The handle refuses, so the shell has nothing to send. */
+    wls_sleep_order_t refused = wls_sleep_release_open(/*sends_release=*/false);
+    EXPECT_FALSE(wls_sleep_release_permitted(&refused));
+    EXPECT_FALSE(wls_sleep_release_permitted(NULL));
+}
+
+TEST(SplitLogic, the_release_handle_is_permitted_on_battery) {
+    wls_sleep_order_t release = wls_sleep_release_open(/*sends_release=*/true);
+    EXPECT_TRUE(wls_sleep_release_permitted(&release));
+}
+
+TEST(SplitLogic, the_release_handle_agrees_with_the_rule_it_replaces) {
+    /* The handle's permission is exactly `wls_split_can_send_relay()`, for both
+     * transports: the stricter form cannot be more permissive than the rule it
+     * formalises. */
+    for (int sends_release = 0; sends_release <= 1; sends_release++) {
+        wls_sleep_order_t release = wls_sleep_release_open(sends_release != 0);
+        EXPECT_EQ(wls_split_can_send_relay(sends_release != 0), wls_sleep_release_permitted(&release));
+    }
+}
+
+TEST(SplitLogic, the_order_and_the_release_cannot_disagree) {
+    /* The two endpoints of the contract take the SAME fact derived the same way
+     * (`wireless_get_current_devs() != DEVS_USB`). This is the property that
+     * makes D2 more than a redundant guard: if the release side could be
+     * permitted while the order side is unpermitted -- or the reverse -- then the
+     * executor's premise ("a release is sent whenever one is reachable") would
+     * stop holding with nothing failing. Pin the equivalence across the
+     * transport axis. */
+    for (int on_usb = 0; on_usb <= 1; on_usb++) {
+        const bool        sends   = (on_usb == 0);
+        wls_sleep_order_t order   = wls_sleep_order_open(sends, 1);
+        wls_sleep_order_t release = wls_sleep_release_open(sends);
+        EXPECT_EQ(wls_sleep_order_permitted(&order), wls_sleep_release_permitted(&release));
+        EXPECT_EQ(sends, wls_split_can_order_sleep(sends));
+        EXPECT_EQ(sends, wls_split_can_send_relay(sends));
+    }
+}
+
 /* --- D1: the order's liveness, the safety rung's missing twin -----------------
  *
  * The executor gives the order a SAFETY home (an unreachable release cannot be

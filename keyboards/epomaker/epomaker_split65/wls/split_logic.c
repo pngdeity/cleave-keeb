@@ -67,6 +67,28 @@ bool wls_sleep_order_permitted(const wls_sleep_order_t *order) {
     return order != NULL && order->permitted;
 }
 
+bool wls_split_can_send_relay(bool sends_release_on_this_transport) {
+    /* The release side of the same contract. The 0xCC/0xBB pair relays LED-rail
+     * power, so both are gated by the same fact: while cabled the rail must stay
+     * up on both halves, and broadcasting a release would extinguish the slave's
+     * backlight. This is the rule the sole 0xCC call site's early return encodes;
+     * stating it here lets that site take it as a precondition instead of
+     * re-deriving it, so the order side and the release side cannot disagree. */
+    return sends_release_on_this_transport;
+}
+
+wls_sleep_order_t wls_sleep_release_open(bool sends_release_on_this_transport) {
+    /* The handle IS the decision, on the release side: permitted exactly when the
+     * release is actually sent on this transport. The flag field is unused here
+     * (a release carries no body); it is left zero rather than invented. */
+    wls_sleep_order_t release = {wls_split_can_send_relay(sends_release_on_this_transport), 0};
+    return release;
+}
+
+bool wls_sleep_release_permitted(const wls_sleep_order_t *release) {
+    return release != NULL && release->permitted;
+}
+
 bool wls_sleep_order_outlived_release(uint32_t sent_at_ms, uint32_t now_ms, bool release_transport_still_carries, bool released) {
     /* The liveness counterpart of the executor's safety precondition. A released
      * order is not outstanding; an order within the window may still be

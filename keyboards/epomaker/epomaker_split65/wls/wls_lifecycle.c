@@ -171,8 +171,16 @@ void wls_lifecycle_suspend_wakeup_init_user(void) {
 
     /* The 0xCC/0xBB pair relay LED-rail power to the slave, so they only make
      * sense on battery. While cabled the rail must stay up on both halves;
-     * broadcasting it would extinguish the slave's backlight. */
-    if (wireless_get_current_devs() == DEVS_USB) {
+     * broadcasting it would extinguish the slave's backlight.
+     *
+     * That rule is the release handle's precondition, not a local early return:
+     * `wls_sleep_release_open()` takes the same fact the order executor takes
+     * (`wireless_get_current_devs() != DEVS_USB`), so the transport that may not
+     * ORDER a sleep is exactly the transport that may not RELEASE one. See D2 in
+     * `TODO.md` "Determination residue". */
+    const bool        on_usb  = (wireless_get_current_devs() == DEVS_USB);
+    wls_sleep_order_t release = wls_sleep_release_open(!on_usb);
+    if (!wls_sleep_release_permitted(&release)) {
         return;
     }
 
@@ -188,7 +196,12 @@ void wls_lifecycle_suspend_wakeup_init_user(void) {
 }
 
 void wls_lifecycle_suspend_power_down_user(void) {
-    if (wireless_get_current_devs() == DEVS_USB) {
+    /* The pair's other half, gated by the same release handle: 0xBB relays the
+     * rail down for the same reason 0xCC relays it up, so it may not be sent
+     * while cabled either. */
+    const bool        on_usb  = (wireless_get_current_devs() == DEVS_USB);
+    wls_sleep_order_t release = wls_sleep_release_open(!on_usb);
+    if (!wls_sleep_release_permitted(&release)) {
         return;
     }
 
