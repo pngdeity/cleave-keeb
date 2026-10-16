@@ -164,6 +164,13 @@ bool hsm_usb_teardown_is_safe(bool host_talking, bool driver_idle) {
     return !host_talking && driver_idle;
 }
 
+bool hsm_usb_teardown_refused(bool host_confirmed) {
+    /* Confirmation outranks every hint, so a teardown while confirmed is by
+     * definition wrong. The actuator refuses it, which makes the rule hold for
+     * every caller at once. See the header. */
+    return host_confirmed;
+}
+
 bool hsm_switch_moved(hsm_switch_pos_t now_pos, hsm_switch_pos_t last_pos, bool forced) {
     if (forced) {
         return true;

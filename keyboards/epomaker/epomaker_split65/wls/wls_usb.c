@@ -7,6 +7,8 @@
 #include "usb_util.h"
 #include "usb_main.h"
 
+#include "wls/transport_logic.h"
+
 void usb_power_connect(void) {
 #ifdef USB_POWER_EN_PIN
     gpio_write_pin_low(USB_POWER_EN_PIN);
@@ -55,15 +57,18 @@ void wls_usb_connect(bool enable) {
 #if !defined(KEEP_USB_CONNECTION_IN_WIRELESS_MODE)
         /* A confirmed host is never torn down.
          *
-         * `USB_ACTIVE` means the peripheral enumerated and the host is talking
-         * to us: the transport rule says a confirmed host outranks every hint,
-         * so a teardown command issued while confirmed is by definition wrong.
-         * Without this gate a hint-level caller could cut the line the
-         * confirmation just established, and the board would enumerate and
-         * self-detach about once a second (the livelock this exists to
-         * prevent). Gating the *actuator* rather than each caller makes every
-         * path -- present and future -- safe at once. */
-        if (usb_connected_state()) {
+         * The rule, stated once in the pure core as
+         * `hsm_usb_teardown_refused(host_confirmed)`: a teardown issued while a
+         * host is confirmed is by definition wrong, because confirmation
+         * outranks every hint. Without this gate a hint-level caller could cut
+         * the line the confirmation just established, and the board would
+         * enumerate and self-detach about once a second (the livelock this
+         * exists to prevent). Gating the *actuator* rather than each caller
+         * makes every path -- present and future -- safe at once.
+         * `usb_connected_state()` is the confirmation fact (it is
+         * `usbGetDriverStateI(&USB_DRIVER) == USB_ACTIVE`); the shell reads it,
+         * the core decides. See D9 of `TODO.md` "Determination residue". */
+        if (hsm_usb_teardown_refused(usb_connected_state())) {
             return;
         }
         if (USB_DRIVER.state != USB_STOP) {

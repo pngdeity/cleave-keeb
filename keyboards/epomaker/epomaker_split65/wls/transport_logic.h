@@ -295,6 +295,23 @@ bool hsm_transport_input_is_pure(bool reads_line_state);
  * driver has reached USB_STOP (so there is nothing left to tear down)". */
 bool hsm_usb_teardown_is_safe(bool host_talking, bool driver_idle);
 
+/* Whether the ACTUATOR must refuse a teardown command, given whether a host is
+ * currently confirmed on the line.
+ *
+ * This is the actuator-half statement of the same "a confirmed host outranks
+ * every hint" rule that `hsm_transport_may_drive_line` states for the direction
+ * of a decision. It exists so the gate at `wls_usb_connect(false)` is a named
+ * rule rather than a comment: the rule is that a TEARDOWN issued while a host is
+ * confirmed is by definition wrong, because confirmation outranks the hint that
+ * commanded the teardown. Without it a hint-level caller could cut the line the
+ * confirmation just established, and the board would enumerate and self-detach
+ * about once a second (the 2026-10-13 livelock).
+ *
+ * Gating the ACTUATOR rather than each caller is deliberate: it makes every path
+ * -- present and future -- safe at once, so no caller needs to know the rule.
+ * This is D9 of `TODO.md` "Determination residue". */
+bool hsm_usb_teardown_refused(bool host_confirmed);
+
 /* Whether the *switch really moved* between two pin reads.
  *
  * `wls.c`'s detector runs every 50 ms and used to ask "is the resolved

@@ -786,3 +786,35 @@ TEST_F(TransportLogic, the_teardown_rule_is_the_negation_of_in_use) {
         }
     }
 }
+
+/* The actuator's refusal (D9): the rule that holds for every caller at once.
+ *
+ * `wls_usb_connect(false)` refuses a teardown while a host is confirmed, so a
+ * hint-level caller can never cut the line the confirmation just established.
+ * The rule is the actuator-half of "confirmation outranks every hint", stated
+ * once in the core rather than in a comment at the gate. */
+
+TEST_F(TransportLogic, the_actuator_refuses_a_teardown_while_a_host_is_confirmed) {
+    EXPECT_TRUE(hsm_usb_teardown_refused(true));
+}
+
+TEST_F(TransportLogic, the_actuator_permits_a_teardown_with_no_confirmed_host) {
+    EXPECT_FALSE(hsm_usb_teardown_refused(false));
+}
+
+TEST_F(TransportLogic, the_actuator_refusal_agrees_with_the_in_use_rule) {
+    /* The two rules are the same fact at two levels: the actuator refuses
+     * exactly when a host is talking, which is the `host_talking` half of
+     * `hsm_usb_teardown_is_safe`. They must not disagree -- a change to one that
+     * left the other stale would be a rule stated twice. */
+    for (int confirmed = 0; confirmed <= 1; confirmed++) {
+        // When no driver is idle and a host is confirmed, the general rule
+        // refuses; the actuator refuses for the confirmed case alone.
+        if (confirmed) {
+            EXPECT_TRUE(hsm_usb_teardown_refused(true));
+            EXPECT_FALSE(hsm_usb_teardown_is_safe(/*host_talking*/ true, /*driver_idle*/ true));
+        } else {
+            EXPECT_FALSE(hsm_usb_teardown_refused(false));
+        }
+    }
+}
