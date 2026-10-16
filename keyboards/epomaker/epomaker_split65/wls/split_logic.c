@@ -42,3 +42,13 @@ wls_split_action_t wls_split_decide_slave(uint8_t cmd, const uint8_t body[4]) {
 
     return a;
 }
+
+bool wls_split_can_order_sleep(bool sends_wake_on_this_transport) {
+    /* The cross-half contract: the master may only order the slave to stop when
+     * it can also release it. The release (0xCC) is not sent on USB, and the
+     * slave cannot release itself -- only the master's wake or the slave's own
+     * `lpwr_stop_hook_post()` (which needs the slave's own LPWR_WAKEUP) cancels
+     * the order. So if the wake is suppressed on this transport, no sleep may be
+     * ordered: it would be a one-way order. */
+    return sends_wake_on_this_transport;
+}

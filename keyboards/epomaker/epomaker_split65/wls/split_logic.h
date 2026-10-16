@@ -57,3 +57,30 @@ typedef struct {
  * Pure: no I/O, no firmware state. An unknown command decodes to NONE (the slave
  * must stay silent rather than act on a byte it does not understand). */
 wls_split_action_t wls_split_decide_slave(uint8_t cmd, const uint8_t body[4]);
+
+/* ---------------------------------------------------------------------------
+ * May the master order the slave to sleep, given where the master is now and
+ * which transport it will wake on?
+ *
+ * This is the cross-half contract, and it is a SINGLE decision rather than two
+ * (the master's presleep send, `wls_lifecycle_lpwr_allow_presleep()`, and the
+ * slave's own wake suppression). It exists because the pair is asymmetric and
+ * the asymmetry is not visible from either half alone:
+ *
+ *   - `WLS_SPLIT_CMD_SLEEP` (0xAA) makes the slave order ITSELF to stop and arm
+ *     that stop (`wls_split.c`: `wls_order_sleep()` + `lpwr_set_timeout_manual`).
+ *   - `WLS_SPLIT_CMD_WAKEUP` (0xCC) only re-applies the LED rail; it does NOT
+ *     clear the slave's order. The only cancellation is the slave's own
+ *     `lpwr_stop_hook_post()`, which needs the slave's OWN `LPWR_WAKEUP`.
+ *   - `0xCC` has exactly ONE call site, and it returns early while the master is
+ *     on USB. So on USB the master sends the slave no wake at all.
+ *
+ * A master that orders the slave to sleep on a path that can return to USB
+ * therefore strands the slave permanently -- dark and silent, recoverable only
+ * by power-cycling both halves. That was the 30 s dark board's right half.
+ *
+ * `sends_wake_on_this_transport` is the fact that decides it: whether the
+ * master's wake command (0xCC) is actually sent on the transport in question.
+ * The rule is "only order the sleep if the wake is reachable on the transport
+ * the half will be woken on". Pure: no I/O, no firmware state. */
+bool wls_split_can_order_sleep(bool sends_wake_on_this_transport);

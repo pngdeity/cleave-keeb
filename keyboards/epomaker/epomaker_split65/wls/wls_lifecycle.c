@@ -215,11 +215,21 @@ bool wls_lifecycle_lpwr_allow_timeout(void) {
 
 bool wls_lifecycle_lpwr_allow_presleep(void) {
     if (is_keyboard_master()) {
-        const uint8_t body[4] = {wls_sleep_ordered(), 0, 0, 0};
-        if (wls_split_send(WLS_SPLIT_CMD_SLEEP, body)) {
-            dprintf("slave sleep sent\n");
-        } else {
-            dprint("slave sleep failed!\n");
+        /* The cross-half contract, decided once (`wls_split_can_order_sleep`):
+         * the master may only order the slave to stop when it can also release
+         * it. `0xCC` is never sent while the master is on USB, so ordering a
+         * sleep there is a one-way order -- the slave arms its own stop and
+         * nothing cancels it, leaving the half dark and silent until both halves
+         * are power-cycled. Skip the send on that transport rather than strand
+         * the slave. */
+        bool sends_wake = (wireless_get_current_devs() != DEVS_USB);
+        if (wls_split_can_order_sleep(sends_wake)) {
+            const uint8_t body[4] = {wls_sleep_ordered(), 0, 0, 0};
+            if (wls_split_send(WLS_SPLIT_CMD_SLEEP, body)) {
+                dprintf("slave sleep sent\n");
+            } else {
+                dprint("slave sleep failed!\n");
+            }
         }
 
         if (wireless_get_current_devs() != DEVS_USB) {

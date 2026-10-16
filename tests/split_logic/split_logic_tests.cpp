@@ -100,4 +100,42 @@ TEST(SplitLogic, sync_multimode_accepts_the_full_device_range) {
     }
 }
 
+/* --- The cross-half sleep contract (regression 2026-10-15) -----------------
+ *
+ * The master orders the slave to stop with 0xAA, which makes the slave arm its
+ * OWN stop; the only command that releases it is 0xCC, and 0xCC has exactly one
+ * call site, behind an early return on USB. So ordering a sleep on a transport
+ * whose wake is suppressed is a ONE-WAY order: the slave is left dark and
+ * silent, recoverable only by power-cycling both halves. That was the right
+ * half of the 30 s dark board.
+ *
+ * The rule is stated here as a pure decision, so the two halves' agreement is
+ * pinned by a test rather than by matching the master's send site against the
+ * slave's handler by hand. */
+
+TEST(SplitLogic, may_not_order_sleep_when_the_wake_is_suppressed) {
+    /* The fault case: this transport never sends 0xCC, so the order would never
+     * be released. Refuse it. */
+    EXPECT_FALSE(wls_split_can_order_sleep(/*sends_wake=*/false));
+}
+
+TEST(SplitLogic, may_order_sleep_when_the_wake_is_reachable) {
+    EXPECT_TRUE(wls_split_can_order_sleep(/*sends_wake=*/true));
+}
+
+TEST(SplitLogic, the_contract_is_exactly_that_the_wake_must_be_reachable) {
+    /* Composed the way the shell composes it: the master derives
+     * `sends_wake` from the transport (0xCC is skipped on USB), and the
+     * decision consumes it. On USB -- the transport the user returns to -- the
+     * order must be refused; on any other transport it may proceed. This is the
+     * exact state that stranded the right half. */
+    bool on_usb         = true;
+    bool sends_wake_usb = (on_usb != true); /* wireless_get_current_devs() == DEVS_USB */
+    EXPECT_FALSE(wls_split_can_order_sleep(sends_wake_usb));
+
+    bool on_bt         = false;
+    bool sends_wake_bt = (on_bt != true);
+    EXPECT_TRUE(wls_split_can_order_sleep(sends_wake_bt));
+}
+
 } // namespace
