@@ -421,13 +421,34 @@ bool lpwr_stop_is_allowed(void) {
 }
 
 uint32_t lpwr_wakeup_armed_mask(void) {
-    /* The codes this board actually arms, and only those. UART is deliberately
-     * absent: this board's lpwr_exti_init() never arms UART_RX_PIN (the
-     * module's own traffic would defeat deep sleep), yet the WB32 EXTI reports
-     * by pad number alone, so the module UART RX pad is aliased to a matrix
-     * column and a column edge arrives here stamped LPWR_WAKEUP_UART. Naming
-     * UART armed would let that phantom be acted on as a real wake. */
-    return LPWR_WAKEUP_MATRIX | LPWR_WAKEUP_CABLE | LPWR_WAKEUP_SWITCH | LPWR_WAKEUP_USB;
+    /* The codes this board arms, derived from the pad->code attribution below
+     * rather than hand-written, and asserted sound by `lpwr_excluded_code_is_safe`.
+     *
+     * UART is deliberately NOT armed: this board's `lpwr_exti_init()` never
+     * registers UART_RX_PIN (the module's own traffic would defeat deep sleep).
+     * That exclusion is only SOUND because the pad UART is reported on is also
+     * armed under another code -- the WB32 EXTI reports by pad number alone
+     * (`PAL_PAD(line) = line & 0x0F`), so UART_RX_PIN (C11, pad 11) and the
+     * matrix column B11 (pad 11) are indistinguishable, and an edge there is
+     * still reachable as LPWR_WAKEUP_MATRIX. If UART's pad were NOT otherwise
+     * armed, excluding UART would discard every real edge on it.
+     *
+     * `lpwr_excluded_code_is_safe(excluded, covered)` is that rule, applied at
+     * the point the mask is built: UART is excluded AND its pad is covered by
+     * MATRIX, so the exclusion holds. Flipping either classification below makes
+     * the check fail and the code armed instead -- failing toward waking rather
+     * than toward a silent phantom-discard. */
+    const bool uart_is_armed                 = false; /* not registered: its traffic would defeat deep sleep */
+    const bool uart_pad_is_covered_by_matrix = true;  /* pad 11 is also matrix column B11 */
+
+    const bool uart_may_be_excluded = lpwr_excluded_code_is_safe(!uart_is_armed, uart_pad_is_covered_by_matrix);
+
+    /* Arm the code unless it is both unarmed-by-design and safe to exclude. An
+     * exclusion that is not safe falls through to arming the code, so a real
+     * wake is never discarded on account of a wrong attribution. */
+    const bool uart_effective = uart_is_armed || !uart_may_be_excluded;
+
+    return (uart_effective ? LPWR_WAKEUP_UART : 0) | LPWR_WAKEUP_MATRIX | LPWR_WAKEUP_CABLE | LPWR_WAKEUP_SWITCH | LPWR_WAKEUP_USB;
 }
 
 void lpwr_stop_hook_post(void) {

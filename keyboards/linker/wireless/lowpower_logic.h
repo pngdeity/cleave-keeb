@@ -26,6 +26,35 @@ bool lpwr_stop_is_allowed_decide(bool is_master, bool lower_sleep);
 bool lpwr_wakeup_is_real(uint32_t wake_set, uint32_t armed_mask);
 
 /* ---------------------------------------------------------------------------
+ * Pad-aliasing soundness, as a pure decision.
+ *
+ * The WB32 EXTI reports by PAD NUMBER ALONE: `PAL_PAD(line) = line & 0x0F`
+ * (chibios-contrib WB32 GPIOv1 `hal_pal_lld.h`), and `palcallback()` receives
+ * that pad, not the port. So two pins on different ports with the same pad
+ * number are INDISTINGUISHABLE to the wake classifier, which stamps the code of
+ * whichever pin it registered under that pad.
+ *
+ * That is why a board may exclude a code from its armed mask (this board
+ * excludes UART: the module's own traffic would defeat deep sleep) only when the
+ * excluded code's reporting pad is ALSO covered by a code the board does arm --
+ * otherwise a genuine edge on that pad is stamped with the excluded code and
+ * silently discarded. The rule is a property of the pad->code attribution, not
+ * of the mask alone: it relates the two, which is what no single file stated.
+ *
+ * `excluded_code_pad_is_also_armed` is that fact pre-decided: whether the pad
+ * the excluded code is reported on is one the board arms under some OTHER code.
+ * The decision is `!excluded || covered`: excluding a code whose pad is not
+ * otherwise armed would drop a real wake, so it must be refused.
+ *
+ * `excluded`  -- the code is being left out of the armed mask.
+ * `covered`   -- the pad the excluded code is reported on is armed under another
+ *                code that the board keeps (so an edge there still wakes).
+ *
+ * Returns true when the mask is sound: every excluded code's pad is still
+ * reachable through an armed code. Pure: no registers, no globals. */
+bool lpwr_excluded_code_is_safe(bool excluded, bool covered);
+
+/* ---------------------------------------------------------------------------
  * Idle-timeout admissibility, as a pure decision.
  *
  * The machine may enter PRESLEEP on an idle timeout, or immediately when a

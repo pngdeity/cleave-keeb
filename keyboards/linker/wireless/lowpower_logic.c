@@ -17,6 +17,14 @@ bool lpwr_wakeup_is_real(uint32_t wake_set, uint32_t armed_mask) {
     return (wake_set & armed_mask) != 0;
 }
 
+bool lpwr_excluded_code_is_safe(bool excluded, bool covered) {
+    /* A code the board does not arm is safe to exclude ONLY if the pad it is
+     * reported on is still reachable through an armed code. If it is not, an
+     * edge on that pad is stamped with the excluded code and dropped -- a real
+     * wake silently discarded. So: not excluded, or covered. */
+    return !excluded || covered;
+}
+
 bool lpwr_timeout_allowed_decide(bool hook_allows, bool usb_active, bool manual_pending, bool idle_elapsed) {
     /* A board hook may forbid the idle timeout outright (including a pending
      * manual override: the board knows a stop would be unsafe). A live USB host

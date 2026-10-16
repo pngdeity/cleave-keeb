@@ -76,11 +76,12 @@ TEST_F(LowpowerLogicTest, real_wake_survives_a_phantom_in_the_same_cycle) {
 }
 
 TEST_F(LowpowerLogicTest, pad_aliasing_is_a_pinned_board_fact) {
-    // The WB32 EXTI reports by pad number only (`PAL_PAD(line) = line & 0x0F`),
-    // so pads are shared between ports. This board's module UART RX is C11 and
-    // matrix column 11 is B11 -- both pad 11. A line event on pad 11 is
-    // therefore classified UART even when it came from the matrix column, and
-    // because the board never arms UART the phantom is discarded.
+    // The WB32 EXTI reports by pad number only (`PAL_PAD(line) = line & 0x0F`,
+    // chibios-contrib WB32 GPIOv1), so pads are shared between ports. This
+    // board's module UART RX is C11 and matrix column 11 is B11 -- both pad 11.
+    // A line event on pad 11 is therefore classified UART even when it came from
+    // the matrix column, and because the board never arms UART the phantom is
+    // discarded.
     //
     // This test pins the two facts that make that survivable: UART is not in
     // the armed mask, and the set-and-mask decision is not fooled by it.
@@ -91,6 +92,49 @@ TEST_F(LowpowerLogicTest, pad_aliasing_is_a_pinned_board_fact) {
 
     // A genuine matrix wake on a differently-numbered pad still registers:
     EXPECT_TRUE(lpwr_wakeup_is_real(LPWR_WAKEUP_MATRIX, armed));
+}
+
+/* --- Pad-aliasing soundness: the rule the mask's comment only stated ---------
+ *
+ * The mask above excludes UART. *Why that is safe* was comment prose: because
+ * UART's reporting pad is also reachable through a code the board arms. That
+ * relation -- the excluded code's pad coverage -- had no home; the predicate
+ * `lpwr_excluded_code_is_safe` is it. These vectors pin it, and the board's
+ * `lpwr_wakeup_armed_mask()` now applies it where the mask is built. */
+
+TEST_F(LowpowerLogicTest, arming_a_code_needs_no_coverage_argument) {
+    // `excluded == false`: nothing is being left out, so no coverage is owed.
+    EXPECT_TRUE(lpwr_excluded_code_is_safe(/*excluded=*/false, /*covered=*/false));
+    EXPECT_TRUE(lpwr_excluded_code_is_safe(/*excluded=*/false, /*covered=*/true));
+}
+
+TEST_F(LowpowerLogicTest, excluding_a_code_whose_pad_is_otherwise_armed_is_sound) {
+    // UART's case: excluded, but its pad (11) is also matrix column B11, so an
+    // edge there still wakes via MATRIX.
+    EXPECT_TRUE(lpwr_excluded_code_is_safe(/*excluded=*/true, /*covered=*/true));
+}
+
+TEST_F(LowpowerLogicTest, excluding_a_code_whose_pad_is_not_armed_drops_a_wake) {
+    // The unsafe case: excluded AND its pad is not reachable through any armed
+    // code, so a real edge on that pad would be silently discarded. The
+    // predicate refuses it, and the board's mask builder then arms the code.
+    EXPECT_FALSE(lpwr_excluded_code_is_safe(/*excluded=*/true, /*covered=*/false));
+}
+
+TEST_F(LowpowerLogicTest, the_board_mask_builder_arms_uart_only_when_its_exclusion_is_unsound) {
+    // Composed the way `lpwr_wakeup_armed_mask()` composes it, for the two
+    // attributions. On this board UART is excluded and its pad is covered, so
+    // UART is NOT armed (its phantom stays discardable). If the coverage fact
+    // were false, the exclusion would be unsound and the code must be armed
+    // instead -- failing toward waking, never toward a silent discard.
+    auto uart_effective = [](bool uart_is_armed, bool pad_covered) {
+        bool may_be_excluded = lpwr_excluded_code_is_safe(!uart_is_armed, pad_covered);
+        return uart_is_armed || !may_be_excluded;
+    };
+
+    EXPECT_FALSE(uart_effective(/*uart_is_armed=*/false, /*pad_covered=*/true)); // this board
+    EXPECT_TRUE(uart_effective(/*uart_is_armed=*/false, /*pad_covered=*/false)); // would drop wakes: arm it
+    EXPECT_TRUE(uart_effective(/*uart_is_armed=*/true, /*pad_covered=*/false));  // armed by design
 }
 
 TEST_F(LowpowerLogicTest, timeout_is_allowed_only_when_a_stop_can_be_taken) {
