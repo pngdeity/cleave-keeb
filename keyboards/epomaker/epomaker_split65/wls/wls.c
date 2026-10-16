@@ -389,24 +389,34 @@ void lpwr_exti_init_hook(void) {
 }
 
 void palcallback_cb(uint8_t line) {
-    switch (line) {
-        case PAL_PAD(HS_BAT_CABLE_PIN): {
-            lpwr_set_sleep_wakeupcd(LPWR_WAKEUP_CABLE);
-        } break;
-#ifdef HS_BT_DEF_PIN
-        case PAL_PAD(HS_BT_DEF_PIN): {
-            lpwr_set_sleep_wakeupcd(LPWR_WAKEUP_SWITCH);
-        } break;
-#endif
+    /* The board-specific pads, classified by the SAME function the mask reasons
+     * about (`lpwr_code_of_pad`), not a second copy of the pads. A `switch` here
+     * restated the attribution the mask's soundness depends on, and a pin change
+     * would update the code and not the table with nothing failing -- D6 of
+     * `TODO.md` "Determination residue". The pads are the board's own, read from
+     * the pins so there is no second literal to drift. */
+    const lpwr_attribution_t attr = {
+        .uart_pad   = PAL_PAD(UART_RX_PIN),
+        .usb_pad    = PAL_PAD(A12),
+        .cable_pad  = PAL_PAD(HS_BAT_CABLE_PIN),
+        .bt_pad     = PAL_PAD(HS_BT_DEF_PIN),
+        .g24_pad    = PAL_PAD(HS_2G4_DEF_PIN),
+        .uart_code  = LPWR_WAKEUP_UART,
+        .usb_code   = LPWR_WAKEUP_USB,
+        .cable_code = LPWR_WAKEUP_CABLE,
+        .bt_code    = LPWR_WAKEUP_SWITCH,
+        .g24_code   = LPWR_WAKEUP_SWITCH,
+        .default_code = LPWR_WAKEUP_MATRIX,
+    };
 
-#ifdef HS_2G4_DEF_PIN
-        case PAL_PAD(HS_2G4_DEF_PIN): {
-            lpwr_set_sleep_wakeupcd(LPWR_WAKEUP_SWITCH);
-        } break;
-#endif
-        default: {
-        } break;
-    }
+    const uint32_t code = lpwr_code_of_pad(&attr, line, is_keyboard_master());
+
+    /* Set is idempotent (`lpwr_set_sleep_wakeupcd` accumulates), and upstream's
+     * `palcallback` has already stamped its own set for this pad before calling
+     * here -- MATRIX by default, UART/USB for its own pads. So this adds exactly
+     * the board's pads that upstream does not know (CABLE, SWITCH); re-stamping a
+     * code upstream already set is a no-op. */
+    lpwr_set_sleep_wakeupcd(code);
 }
 
 void hs_sleep_order_liveness_check(void) {

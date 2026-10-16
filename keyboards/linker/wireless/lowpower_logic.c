@@ -25,6 +25,61 @@ bool lpwr_excluded_code_is_safe(bool excluded, bool covered) {
     return !excluded || covered;
 }
 
+uint32_t lpwr_code_of_pad(const lpwr_attribution_t *attr, uint8_t pad, bool is_master) {
+    /* The classifier, as a function of the pad and the board's attribution. The
+     * order is the order the pins are named in `lpwr_attribution_t`; the mode
+     * switch pads exist only on the master, so on the slave they fall through to
+     * MATRIX -- which is correct, because the slave never registers them.
+     *
+     * MATRIX is the default and NOT a case: a pad the board registered no
+     * specific code under reports MATRIX. */
+    if (pad == attr->uart_pad) {
+        return attr->uart_code;
+    }
+    if (pad == attr->usb_pad) {
+        return attr->usb_code;
+    }
+    if (pad == attr->cable_pad) {
+        return attr->cable_code;
+    }
+    if (is_master) {
+        if (pad == attr->bt_pad) {
+            return attr->bt_code;
+        }
+        if (pad == attr->g24_pad) {
+            return attr->g24_code;
+        }
+    }
+    return attr->default_code;
+}
+
+uint8_t lpwr_pad_of_code(const lpwr_attribution_t *attr, uint32_t code, bool is_master) {
+    if (code == attr->uart_code) {
+        return attr->uart_pad;
+    }
+    if (code == attr->usb_code) {
+        return attr->usb_pad;
+    }
+    if (code == attr->cable_code) {
+        return attr->cable_pad;
+    }
+    if (is_master) {
+        if (code == attr->bt_code) {
+            return attr->bt_pad;
+        }
+        if (code == attr->g24_code) {
+            return attr->g24_pad;
+        }
+    }
+    return LPWR_PAD_NONE;
+}
+
+bool lpwr_pads_collide(uint8_t pad_a, uint8_t pad_b) {
+    /* `PAL_PAD(line) = line & 0x0F`, so the port is discarded and two pins
+     * collide exactly when their pad numbers are equal. */
+    return pad_a == pad_b;
+}
+
 bool lpwr_timeout_allowed_decide(bool hook_allows, bool usb_active, bool manual_pending, bool idle_elapsed) {
     /* A board hook may forbid the idle timeout outright (including a pending
      * manual override: the board knows a stop would be unsafe). A live USB host

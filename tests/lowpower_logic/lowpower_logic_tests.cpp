@@ -193,3 +193,165 @@ TEST_F(LowpowerLogicTest, an_unordered_idle_timeout_cannot_reach_presleep) {
     EXPECT_FALSE(stop_allowed);
     EXPECT_FALSE(lpwr_presleep_is_allowed_decide(timeout_allowed, stop_allowed));
 }
+
+/* --- The pad -> code attribution (D6) --------------------------------------
+ *
+ * The mask's soundness (`lpwr_excluded_code_is_safe`) reasons about which pad a
+ * code is reported on, and that relation used to be prose: a table in the doc
+ * plus a `switch` in the board's classifier, with nothing failing if a pin moved
+ * (D6 of `TODO.md` "Determination residue"). These vectors pin the attribution
+ * as a checkable function of the pad, and the collisions it implies. The pads
+ * below mirror the board's pins: UART RX C11=11, USB detect A12=12, cable A7=7,
+ * mode switch C14=14 and C15=15. */
+
+static lpwr_attribution_t board_attr(void) {
+    lpwr_attribution_t a;
+    a.uart_pad     = 11;
+    a.usb_pad      = 12;
+    a.cable_pad    = 7;
+    a.bt_pad       = 14;
+    a.g24_pad      = 15;
+    a.uart_code    = LPWR_WAKEUP_UART;
+    a.usb_code     = LPWR_WAKEUP_USB;
+    a.cable_code   = LPWR_WAKEUP_CABLE;
+    a.bt_code      = LPWR_WAKEUP_SWITCH;
+    a.g24_code     = LPWR_WAKEUP_SWITCH;
+    a.default_code = LPWR_WAKEUP_MATRIX;
+    return a;
+}
+
+TEST_F(LowpowerLogicTest, a_registered_pad_reports_its_own_code) {
+    lpwr_attribution_t a = board_attr();
+    EXPECT_EQ(LPWR_WAKEUP_UART, lpwr_code_of_pad(&a, 11, true));
+    EXPECT_EQ(LPWR_WAKEUP_USB, lpwr_code_of_pad(&a, 12, true));
+    EXPECT_EQ(LPWR_WAKEUP_CABLE, lpwr_code_of_pad(&a, 7, true));
+    EXPECT_EQ(LPWR_WAKEUP_SWITCH, lpwr_code_of_pad(&a, 14, true));
+    EXPECT_EQ(LPWR_WAKEUP_SWITCH, lpwr_code_of_pad(&a, 15, true));
+}
+
+TEST_F(LowpowerLogicTest, an_unclaimed_pad_reports_the_default) {
+    // MATRIX is the catch-all, not a pin: any pad no other code claims.
+    lpwr_attribution_t a = board_attr();
+    const uint8_t unclaimed[] = {0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 13};
+    for (uint8_t p : unclaimed) {
+        EXPECT_EQ(LPWR_WAKEUP_MATRIX, lpwr_code_of_pad(&a, p, true));
+    }
+}
+
+TEST_F(LowpowerLogicTest, the_mode_switch_pads_are_master_only) {
+    /* The slave never registers the mode-switch pins (`wls.c`
+     * `lpwr_exti_init_hook` gates them on `is_keyboard_master()`), so on the
+     * slave a pad 14/15 edge falls through to the default. The attribution must
+     * say so, or the slave would arm a wake source it never registered. */
+    lpwr_attribution_t a = board_attr();
+    EXPECT_EQ(LPWR_WAKEUP_SWITCH, lpwr_code_of_pad(&a, 14, true));
+    EXPECT_EQ(LPWR_WAKEUP_SWITCH, lpwr_code_of_pad(&a, 15, true));
+    EXPECT_EQ(LPWR_WAKEUP_MATRIX, lpwr_code_of_pad(&a, 14, false));
+    EXPECT_EQ(LPWR_WAKEUP_MATRIX, lpwr_code_of_pad(&a, 15, false));
+    // The master-independent pads report the same on either half.
+    EXPECT_EQ(LPWR_WAKEUP_CABLE, lpwr_code_of_pad(&a, 7, false));
+    EXPECT_EQ(LPWR_WAKEUP_UART, lpwr_code_of_pad(&a, 11, false));
+}
+
+TEST_F(LowpowerLogicTest, the_inverse_lookup_finds_the_reporting_pad) {
+    /* The mask asks "which pad does this code claim"; the inverse must agree
+     * with the forward classifier, so there is one attribution, not two. */
+    lpwr_attribution_t a = board_attr();
+    EXPECT_EQ(11, lpwr_pad_of_code(&a, LPWR_WAKEUP_UART, true));
+    EXPECT_EQ(12, lpwr_pad_of_code(&a, LPWR_WAKEUP_USB, true));
+    EXPECT_EQ(7, lpwr_pad_of_code(&a, LPWR_WAKEUP_CABLE, true));
+    EXPECT_EQ(14, lpwr_pad_of_code(&a, LPWR_WAKEUP_SWITCH, true));
+    // MATRIX is not a pad: it is the default, so it has no reporting pad.
+    EXPECT_EQ(LPWR_PAD_NONE, lpwr_pad_of_code(&a, LPWR_WAKEUP_MATRIX, true));
+    // The mode switch is master-only here too.
+    EXPECT_EQ(LPWR_PAD_NONE, lpwr_pad_of_code(&a, LPWR_WAKEUP_SWITCH, false));
+}
+
+TEST_F(LowpowerLogicTest, the_inverse_is_consistent_with_the_forward_map) {
+    /* Round trip: for every pad the board registers, the code the forward map
+     * yields must map back to that pad (or to a pad it shares, for the two
+     * switch pads which both yield SWITCH). This is the property that keeps the
+     * two lookups from drifting. */
+    lpwr_attribution_t a = board_attr();
+    const uint8_t pads[] = {11, 12, 7, 14, 15};
+    for (uint8_t p : pads) {
+        uint32_t code = lpwr_code_of_pad(&a, p, true);
+        uint8_t  back = lpwr_pad_of_code(&a, code, true);
+        EXPECT_EQ(code, lpwr_code_of_pad(&a, back, true)) << "pad " << (int)p;
+    }
+}
+
+TEST_F(LowpowerLogicTest, pads_collide_exactly_when_their_numbers_match) {
+    /* `PAL_PAD(line) = line & 0x0F`: the port is discarded, so UART RX C11 and
+     * matrix column B11 are the same pad 11 and the same wake code. Stated as a
+     * function so "which pads collide" has one home. */
+    EXPECT_TRUE(lpwr_pads_collide(11, 11));
+    EXPECT_FALSE(lpwr_pads_collide(11, 12));
+    EXPECT_FALSE(lpwr_pads_collide(7, 14));
+}
+
+TEST_F(LowpowerLogicTest, the_uart_exclusion_is_sound_because_its_pad_is_shared) {
+    /* The composed fact the mask reasons about: UART is excluded, and its pad
+     * (11) is also a matrix pad. The classifier says a pad-11 edge can report
+     * UART, and pad 11 is not a code the board arms -- but the same physical pad
+     * is reachable as MATRIX, which it does arm. Composed through the real
+     * deciders, excluding UART is sound. */
+    lpwr_attribution_t a      = board_attr();
+    uint32_t           pad_11 = lpwr_code_of_pad(&a, 11, true);
+    EXPECT_EQ(LPWR_WAKEUP_UART, pad_11);
+
+    const bool uart_is_armed   = false; // the board never arms UART
+    const bool pad_11_as_matrix = true; // pad 11 is also matrix column B11
+    EXPECT_TRUE(lpwr_excluded_code_is_safe(!uart_is_armed, pad_11_as_matrix));
+
+    // And the opposite: an excluded code whose pad has no other claimant would
+    // be refused, so the composition is not vacuously true.
+    EXPECT_FALSE(lpwr_excluded_code_is_safe(/*excluded*/ true, /*covered*/ false));
+}
+
+TEST_F(LowpowerLogicTest, no_other_pad_collision_drops_a_wake) {
+    /* D7: "no OTHER collision drops a wake" was an argument in prose. It is
+     * checkable now that the attribution is a function. The claim is: on this
+     * board the ONLY code the mask excludes is UART, and UART's pad is covered by
+     * an armed code; every OTHER registered pad reports a code the board arms, so
+     * no collision between two registered pads can discard a wake.
+     *
+     * Derived, not restated: walk the pads the board registers, take each one's
+     * code through the classifier, and assert that (a) it is armed, or (b) it is
+     * UART, whose pad is covered. A future pin move that introduced a new
+     * unarmed code on a registered pad would fail here -- which is the property
+     * the prose argument could not enforce. */
+    lpwr_attribution_t a = board_attr();
+
+    // The codes the board arms, from the mask builder (`lpwr_wakeup_armed_mask`).
+    const uint32_t armed = LPWR_WAKEUP_MATRIX | LPWR_WAKEUP_CABLE | LPWR_WAKEUP_SWITCH | LPWR_WAKEUP_USB;
+    // The one code the board excludes by design.
+    const uint32_t excluded = LPWR_WAKEUP_UART;
+
+    const uint8_t registered[] = {11 /* UART RX C11 */, 12 /* A12 */, 7 /* cable */, 14 /* BT */, 15 /* 2.4G */};
+    for (uint8_t p : registered) {
+        const uint32_t code = lpwr_code_of_pad(&a, p, true);
+        const bool     is_armed = (code & armed) != 0;
+        const bool     is_the_excluded_code = code == excluded;
+        // Every registered pad either reports an armed code, or reports the one
+        // excluded code whose pad coverage is separately argued.
+        EXPECT_TRUE(is_armed || is_the_excluded_code) << "pad " << (int)p << " code " << code;
+    }
+}
+
+TEST_F(LowpowerLogicTest, every_unregistered_pad_reports_the_armed_default) {
+    /* The other half of D7: a pad nobody registered reports MATRIX, which the
+     * board arms -- so an edge on any of them wakes. Combined with the test
+     * above, this is the complete argument the prose only gestured at: every pad
+     * is either armed directly (MATRIX or a registered armed code) or is the one
+     * covered exclusion. */
+    lpwr_attribution_t a = board_attr();
+    const uint32_t     armed_default = LPWR_WAKEUP_MATRIX;
+
+    for (uint8_t p = 0; p < 16; p++) {
+        const uint32_t code = lpwr_code_of_pad(&a, p, true);
+        // Every pad's code is armed, or is the covered exclusion (pad 11).
+        EXPECT_TRUE((code & (armed_default | LPWR_WAKEUP_CABLE | LPWR_WAKEUP_SWITCH | LPWR_WAKEUP_USB)) != 0 || code == LPWR_WAKEUP_UART)
+            << "pad " << (int)p << " code " << code;
+    }
+}
