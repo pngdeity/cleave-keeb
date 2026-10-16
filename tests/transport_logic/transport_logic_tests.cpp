@@ -628,3 +628,71 @@ TEST_F(TransportLogic, md_state_numbers_map_to_the_core_states) {
     EXPECT_EQ(HSM_LINK_NONE, hsm_link_state_of_md(5));
     EXPECT_EQ(HSM_LINK_NONE, hsm_link_state_of_md(0xFF));
 }
+
+/* ---------------------------------------------------------------------------
+ * The at-rest channel cue (X-4). The channel is deterministic at every instant
+ * -- `wireless_get_current_devs()` -- so this is a pure map from a device index
+ * to the cue. What the vectors must pin:
+ *   (1) each surfaced channel gets ITS OWN cue (the whole point: a person reads
+ *       the channel from which LED is lit, so two channels sharing a cue is the
+ *       defect);
+ *   (2) USB and the un-surfaced BT4/BT5 all map to "no channel LED", and do so
+ *       legibly;
+ *   (3) an out-of-range index is not a channel.
+ * ------------------------------------------------------------------------- */
+
+/* Every surfaced channel maps to the cue that names it. Values are `module.h`'s
+ * DEVS_* (0 USB .. 6 2.4 GHz). */
+TEST_F(TransportLogic, each_surfaced_channel_maps_to_its_own_cue) {
+    EXPECT_EQ(HSM_CHAN_CUE_BT1, hsm_chan_cue_of(DEVS_BT1));
+    EXPECT_EQ(HSM_CHAN_CUE_BT2, hsm_chan_cue_of(DEVS_BT2));
+    EXPECT_EQ(HSM_CHAN_CUE_BT3, hsm_chan_cue_of(DEVS_BT3));
+    EXPECT_EQ(HSM_CHAN_CUE_2G4, hsm_chan_cue_of(DEVS_2G4));
+}
+
+/* The invariant that makes the cue readable at all: no two *surfaced* channels
+ * share a cue. If a refactor ever collapses two arms this fails, which is the
+ * X-4 defect (a mode that cannot be told from another) reintroduced. */
+TEST_F(TransportLogic, surfaced_channels_never_share_a_cue) {
+    const hsm_chan_cue_t bts[] = {hsm_chan_cue_of(DEVS_BT1), hsm_chan_cue_of(DEVS_BT2), hsm_chan_cue_of(DEVS_BT3), hsm_chan_cue_of(DEVS_2G4)};
+    for (size_t i = 0; i < sizeof(bts) / sizeof(bts[0]); i++) {
+        for (size_t j = i + 1; j < sizeof(bts) / sizeof(bts[0]); j++) {
+            EXPECT_NE(bts[i], bts[j]) << "channels " << i << " and " << j << " would look identical";
+        }
+    }
+}
+
+/* USB has no channel LED: the cable is the mode (X-3's switch position), and the
+ * four channel LEDs are wireless only. Reported as NONE so the shell *clears* a
+ * stale wireless cue rather than leaving the last channel lit on a cabled board. */
+TEST_F(TransportLogic, usb_has_no_channel_led) {
+    EXPECT_EQ(HSM_CHAN_CUE_NONE, hsm_chan_cue_of(DEVS_USB));
+}
+
+/* BT4 is not surfaced as a channel keycode (A9/B14) and is the one index the
+ * duplicated `HSM_DEVS_*` literals in `transport_logic.c` do not name. This pins
+ * that it lands on NONE by ordinary control flow and not by a catch-all that
+ * might later swallow a real channel. BT5, by contrast, DOES have an arm (the
+ * literal exists), so its cue is its own -- tested above. */
+TEST_F(TransportLogic, unsurfaced_bt4_has_no_led) {
+    EXPECT_EQ(HSM_CHAN_CUE_NONE, hsm_chan_cue_of(DEVS_BT4));
+}
+
+/* An out-of-range index is not a channel: it must not light a channel LED the
+ * person never selected. */
+TEST_F(TransportLogic, out_of_range_index_is_not_a_channel) {
+    EXPECT_EQ(HSM_CHAN_CUE_NONE, hsm_chan_cue_of(7));
+    EXPECT_EQ(HSM_CHAN_CUE_NONE, hsm_chan_cue_of(0xFF));
+}
+
+/* The two cues are different concerns and must not be conflated (a board can be
+ * CONNECTED on BT2 or REJECT on BT3; the link cue says the first, the channel
+ * cue the second). This pins that the channel map is total over the device
+ * range the transport core can carry, so the shell never has to guess. */
+TEST_F(TransportLogic, channel_cue_is_total_over_the_device_range) {
+    for (uint8_t d = DEVS_USB; d <= DEVS_2G4; d++) {
+        hsm_chan_cue_t c = hsm_chan_cue_of(d);
+        EXPECT_GE(c, HSM_CHAN_CUE_NONE);
+        EXPECT_LE(c, HSM_CHAN_CUE_2G4);
+    }
+}

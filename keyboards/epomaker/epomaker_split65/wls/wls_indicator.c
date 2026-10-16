@@ -357,6 +357,70 @@ void wls_indicator_link_state(void) {
     rgb_matrix_set_color(HS_RGB_BLINK_INDEX_BT3, dim_red.r, dim_red.g, dim_red.b);
 }
 
+/* The at-rest channel cue: which channel is live *right now* (X-4).
+ *
+ * The channel was shown only when it *changed* (`wls_indicate_devs`, a bounded
+ * flash armed at the transition sites). At rest the board said nothing, so a
+ * person could not answer "which machine will this type into?" without acting --
+ * which is exactly what X-4 forbids ("the mode must be indicated *while the
+ * switch is in that position*"). This is the same gap as X-30's REJECT, for a
+ * different state: a carried fact with no sight.
+ *
+ * The cue is *steady and dim* -- deliberately neither the transition flash's
+ * motion (X-11: do not reuse a pattern with a new meaning) nor full brightness
+ * (so it does not read as "something just happened", X-10). One LED lit, and
+ * which LED carries the channel (X-9: never colour alone -- position does the
+ * work here).
+ *
+ * ARBITRATION with `wls_indicator_link_state()` above: that function paints the
+ * BT1/2/3 LEDs on REJECT, the same LEDs this one would light on a BT channel. So
+ * REJECT must WIN -- a refused link is the more urgent fact, and letting the
+ * steady channel cue paint over it would restore the exact flattening X-30 just
+ * removed. This function therefore returns early on REJECT and lets the cue
+ * above own those LEDs; on every other state the two are disjoint (the cue above
+ * paints nothing).
+ *
+ * Master-gated: the channel is a property of the board, and the master is the
+ * half that holds the transport state (`wireless_get_current_devs()` is
+ * meaningful there in the way the other indicators already assume). */
+void wls_indicator_channel_state(void) {
+    if (!is_keyboard_master()) {
+        return;
+    }
+
+    /* REJECT wins these LEDs (see the arbitration note). */
+    if (hsm_link_state_of_md((uint8_t)*md_getp_state()) == HSM_LINK_REJECT) {
+        return;
+    }
+
+    /* The steady at-rest intensity. Dim, and distinct from the flash's cadence
+     * and from "nothing": a person glancing down sees one small lit LED and
+     * reads the channel from *which* one it is. */
+    RGB cue = {0x10, 0x10, 0x10};
+
+    switch (hsm_chan_cue_of(wireless_get_current_devs())) {
+        case HSM_CHAN_CUE_BT1:
+            rgb_matrix_set_color(HS_RGB_BLINK_INDEX_BT1, cue.r, cue.g, cue.b);
+            break;
+        case HSM_CHAN_CUE_BT2:
+            rgb_matrix_set_color(HS_RGB_BLINK_INDEX_BT2, cue.r, cue.g, cue.b);
+            break;
+        case HSM_CHAN_CUE_BT3:
+            rgb_matrix_set_color(HS_RGB_BLINK_INDEX_BT3, cue.r, cue.g, cue.b);
+            break;
+        case HSM_CHAN_CUE_2G4:
+            rgb_matrix_set_color(HS_RGB_BLINK_INDEX_2G4, cue.r, cue.g, cue.b);
+            break;
+        case HSM_CHAN_CUE_NONE:
+        case HSM_CHAN_CUE_BT4:
+        case HSM_CHAN_CUE_BT5:
+            /* No channel LED is owed (USB: the cable is the mode; BT4/BT5: not
+             * surfaced, A9/B14). Paint nothing and leave the LEDs to their
+             * owners. */
+            break;
+    }
+}
+
 uint32_t wls_bat_suppress_deadline(void) {
     return bat_suppress_until;
 }

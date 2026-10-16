@@ -389,6 +389,56 @@ hsm_link_cue_t hsm_link_cue_of(hsm_link_state_t state);
  * class (defect 7: one rule written N times). */
 hsm_link_state_t hsm_link_state_of_md(uint8_t md_state);
 
+/* ---------------------------------------------------------------------------
+ * Which channel is live *right now* — the at-rest channel cue (X-4).
+ *
+ * The channel was shown only at its *transition*: `wls_indicate_devs()` fires
+ * from the mode-switch edge, the Fn+Q/W/E keycode path and the re-pair
+ * long-press, then the LEDs return to the fill. So at rest the board says
+ * nothing about which channel is selected -- while X-4 requires the active mode
+ * be indicated *"while the switch is in that position"*, not merely when it
+ * changed. This is the same shape as the link's REJECT flattening (X-30): a
+ * carried state with no sight. The cue below is the missing sight.
+ *
+ * It is a *separate* vocabulary from `hsm_link_cue_t` on purpose. That cue is
+ * about the LINK (is a connection being attempted, settled, refused); this one
+ * is about the CHANNEL (which of USB / BT1..5 / 2.4 GHz is selected). A board
+ * can be CONNECTED on channel BT2, or REJECT on BT3, and the two facts must not
+ * be conflated into one indicator.
+ *
+ * The channel is deterministic at every instant -- `wireless_get_current_devs()`
+ * -- so unlike the link cue this is a pure function of one input with no state
+ * to tick. */
+typedef enum {
+    /* USB: the cable is the mode. Deliberately NOT given a channel LED: USB has
+     * no channel indicator on this board (the four LEDs 17..20 are the wireless
+     * channels only), and inventing one would be a new sight for a state the
+     * switch's own position already shows. Reported so the shell can *clear*
+     * any stale wireless cue rather than leaving the last channel lit. */
+    HSM_CHAN_CUE_NONE = 0,
+    /* BT1: LED 17 lit. */
+    HSM_CHAN_CUE_BT1,
+    /* BT2: LED 18 lit. */
+    HSM_CHAN_CUE_BT2,
+    /* BT3: LED 19 lit. */
+    HSM_CHAN_CUE_BT3,
+    /* BT4/BT5: the channels exist in the module but the board does not surface
+     * them as keycodes (A9/B14); mapped to the same "none" as USB so the shell
+     * has one clear path, and so a corrupt index cannot light a channel the
+     * person never selected. */
+    HSM_CHAN_CUE_BT4,
+    HSM_CHAN_CUE_BT5,
+    /* 2.4 GHz: LED 20 lit. */
+    HSM_CHAN_CUE_2G4,
+} hsm_chan_cue_t;
+
+/* The at-rest cue for a device index. One arm per `DEVS_*`, no `default:` --
+ * the same class guard as `hsm_link_cue_of`: a channel added to the module's
+ * enum fails to compile here rather than silently sharing another channel's
+ * sight. Values are the module's own (`DEVS_USB` = 0 .. `DEVS_2G4` = 6), taken
+ * as a plain number so this header stays include-free. Pure. */
+hsm_chan_cue_t hsm_chan_cue_of(uint8_t devs);
+
 /* Advance the link watch by one tick.
  *
  * `now` is the current time in the caller's units (e.g. `timer_read32()`).

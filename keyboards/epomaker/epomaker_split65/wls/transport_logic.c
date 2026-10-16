@@ -321,3 +321,37 @@ hsm_link_state_t hsm_link_state_of_md(uint8_t md_state) {
             return HSM_LINK_NONE;
     }
 }
+
+hsm_chan_cue_t hsm_chan_cue_of(uint8_t devs) {
+    /* One arm per DEVS_*, no `default:` -- a channel added to the module's enum
+     * fails to compile (`-Wswitch`) rather than quietly inheriting another
+     * channel's LED. The same class guard as `hsm_link_cue_of`, for the same
+     * reason: the original defect there was a `default:` that flattened a
+     * carried state, and this cue is the fix for a state flattened the same way
+     * (the channel at rest). USB is its own arm rather than falling into a
+     * catch-all "unknown" -- the cable *is* a mode (X-3's switch position), it
+     * simply has no channel LED, and saying so explicitly is what tells the
+     * shell to clear a stale wireless cue. */
+    switch (devs) {
+        case HSM_DEVS_BT1:
+            return HSM_CHAN_CUE_BT1;
+        case HSM_DEVS_BT2:
+            return HSM_CHAN_CUE_BT2;
+        case HSM_DEVS_BT3:
+            return HSM_CHAN_CUE_BT3;
+        case HSM_DEVS_BT5:
+            return HSM_CHAN_CUE_BT5;
+        case HSM_DEVS_2G4:
+            return HSM_CHAN_CUE_2G4;
+        case HSM_DEVS_USB:
+            return HSM_CHAN_CUE_NONE;
+    }
+    /* Anything else is a value the board does not select: notably BT4, the one
+     * index between BT3 and BT5 that the duplicated literals at the top of this
+     * file do not name (the vendor enum has it; `hsm_devs_is_bt` covers it by
+     * range). BT4/BT5's *BT5* arm is above because it is in the literal block;
+     * BT4 stays un-surfaced (A9/B14) and so has no arm, landing here with a
+     * corrupt index. Stated as ordinary control flow rather than a `default:`
+     * so it reads as "unhandled", not as a deliberate catch-all mapping. */
+    return HSM_CHAN_CUE_NONE;
+}

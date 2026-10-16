@@ -269,6 +269,12 @@ bool rgb_matrix_indicators_advanced_kb(uint8_t led_min, uint8_t led_max) {
 
     wls_indicator_channel_flash();
     wls_indicator_link_state();
+    /* The at-rest channel cue (X-4), painted after the flash (so a running
+     * transition flash is not overwritten by a steady cue) and after the link
+     * cue (which it defers to on REJECT). Called from the frame pass, so a
+     * person can read the live channel without acting -- the requirement being
+     * that the mode be visible *while it is in effect*. */
+    wls_indicator_channel_state();
 
     /* While suppressed (post-reset) the battery indicator is hidden; the
      * suppression is a deadline, so it simply expires — no re-arm, no flag to

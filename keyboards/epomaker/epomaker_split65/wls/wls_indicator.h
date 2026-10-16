@@ -25,6 +25,12 @@ void wls_indicator_channel_flash(void);
  * owner, so it is one more indicator rather than a shared-state writer. */
 void wls_indicator_link_state(void);
 
+/* Paint the at-rest channel cue: which channel is live *right now* (X-4). Master-
+ * gated, and it yields the channel LEDs to `wls_indicator_link_state()` while the
+ * link is REJECT (that cue wins). Idempotent: it paints the current channel and
+ * leaves the LEDs to their owners when no channel LED is owed (USB / BT4 / BT5). */
+void wls_indicator_channel_state(void);
+
 /* Paint the battery blink and drive the low-battery sleep order. Master-gated. */
 void wls_indicator_battery(void);
 
