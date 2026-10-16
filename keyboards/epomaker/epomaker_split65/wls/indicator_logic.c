@@ -131,6 +131,30 @@ wls_frame_owner_t wls_frame_owner_of(bool exclusive_claim_live) {
  * `wls_led_painters_overlap` answers "do these two sets share any index", which
  * is the relation the precedence is doing work on. */
 
+/* The precedence: the order the frame pass runs the painters, highest priority
+ * first. One home, so the winner rule, the "may write" rule and any future
+ * reader all consult the same statement rather than copies of it.
+ *
+ * The two exclusive "every index" painters (the boot code and RGBR_PLAY) are
+ * NOT listed: they do not compete by index at all -- while either is live it
+ * owns the WHOLE frame, so the shell asks `wls_frame_owner_of` first and never
+ * reaches the per-index painters. `wls_led_painter_of` is asked with the same
+ * "is an exclusive claim live" fact and returns the boot code directly, so an
+ * RGBREC entry here would win every query unconditionally -- the bug this list
+ * deliberately avoids by leaving it out. A painter's set still contains "every
+ * index" for RGBREC (see `painter_owns_index`), which is what makes
+ * `wls_led_may_write` correct for the exclusive case. */
+static const wls_led_painter_t wls_led_painter_precedence[] = {
+    WLS_LED_PAINTER_LINK_STATE,
+    WLS_LED_PAINTER_CHANNEL_FLASH,
+    WLS_LED_PAINTER_CHANNEL_CUE,
+    WLS_LED_PAINTER_BATTERY,
+    WLS_LED_PAINTER_SET_FLASH,
+    WLS_LED_PAINTER_MARKER,
+    WLS_LED_PAINTER_CAPS,
+    WLS_LED_PAINTER_WIN_LOCK,
+};
+
 /* Does `painter`'s declared set contain `index`? Sets are stated as the
  * predicates the shell's own code uses, so a set and its writer cannot drift. */
 static bool painter_owns_index(wls_led_painter_t painter, uint8_t index) {
@@ -138,6 +162,15 @@ static bool painter_owns_index(wls_led_painter_t painter, uint8_t index) {
         case WLS_LED_PAINTER_BOOT_CODE:
             /* rgb_matrix_set_color_all: every index. Also the index the sentinel
              * stands for, so the all-LEDs painter owns the sentinel itself. */
+            return true;
+        case WLS_LED_PAINTER_RGBREC:
+            /* The RGBR_PLAY custom effect (rgb_record's `rgbrec_play`) writes
+             * every LED in its chunk -- over the whole matrix across a frame --
+             * so it owns every index like the boot code. Reserved, not read: the
+             * effect is QMK's, gated by mode selection, and reaches the matrix
+             * without passing through this core; the shell declines to paint the
+             * battery while it is live, and this set is what makes that a rule
+             * rather than a positional test. */
             return true;
         case WLS_LED_PAINTER_LINK_STATE:
             /* The REJECT cue: BT1/2/3 only (wls_indicator_link_state). */
@@ -161,6 +194,12 @@ static bool painter_owns_index(wls_led_painter_t painter, uint8_t index) {
         case WLS_LED_PAINTER_MARKER:
             /* The confinfo.filp marker: index 32. */
             return index == 32;
+        case WLS_LED_PAINTER_CAPS:
+            /* HS_RGB_INDEX_CAPS = 2 (epomaker_split65.c). */
+            return index == 2;
+        case WLS_LED_PAINTER_WIN_LOCK:
+            /* HS_RGB_INDEX_WIN_LOCK = 1 (epomaker_split65.c). */
+            return index == 1;
         case WLS_LED_PAINTER_NONE:
         default:
             return false;
@@ -181,17 +220,9 @@ wls_led_painter_t wls_led_painter_of(uint8_t index, bool boot_code_claim_live) {
     if (boot_code_claim_live) {
         return WLS_LED_PAINTER_BOOT_CODE;
     }
-    static const wls_led_painter_t order[] = {
-        WLS_LED_PAINTER_LINK_STATE,
-        WLS_LED_PAINTER_CHANNEL_FLASH,
-        WLS_LED_PAINTER_CHANNEL_CUE,
-        WLS_LED_PAINTER_BATTERY,
-        WLS_LED_PAINTER_SET_FLASH,
-        WLS_LED_PAINTER_MARKER,
-    };
-    for (size_t i = 0; i < sizeof(order) / sizeof(order[0]); i++) {
-        if (painter_owns_index(order[i], index)) {
-            return order[i];
+    for (size_t i = 0; i < sizeof(wls_led_painter_precedence) / sizeof(wls_led_painter_precedence[0]); i++) {
+        if (painter_owns_index(wls_led_painter_precedence[i], index)) {
+            return wls_led_painter_precedence[i];
         }
     }
     return WLS_LED_PAINTER_NONE;
@@ -200,6 +231,7 @@ wls_led_painter_t wls_led_painter_of(uint8_t index, bool boot_code_claim_live) {
 bool wls_led_painter_is_exclusive(wls_led_painter_t painter) {
     switch (painter) {
         case WLS_LED_PAINTER_BOOT_CODE:
+        case WLS_LED_PAINTER_RGBREC:
             return true;
         case WLS_LED_PAINTER_LINK_STATE:
         case WLS_LED_PAINTER_CHANNEL_FLASH:
@@ -207,6 +239,8 @@ bool wls_led_painter_is_exclusive(wls_led_painter_t painter) {
         case WLS_LED_PAINTER_BATTERY:
         case WLS_LED_PAINTER_SET_FLASH:
         case WLS_LED_PAINTER_MARKER:
+        case WLS_LED_PAINTER_CAPS:
+        case WLS_LED_PAINTER_WIN_LOCK:
         case WLS_LED_PAINTER_NONE:
         default:
             return false;
@@ -228,7 +262,7 @@ bool wls_led_painters_overlap(wls_led_painter_t a, wls_led_painter_t b) {
     if (a == WLS_LED_PAINTER_SET_FLASH || b == WLS_LED_PAINTER_SET_FLASH) {
         return true;
     }
-    for (uint8_t i = 0; i <= 65; i++) {
+    for (uint8_t i = 0; i <= WLS_LED_INDEX_MAX; i++) {
         if (painter_owns_index(a, i) && painter_owns_index(b, i)) {
             return true;
         }
@@ -239,18 +273,54 @@ bool wls_led_painters_overlap(wls_led_painter_t a, wls_led_painter_t b) {
     return false;
 }
 
-bool wls_led_can_paint(uint8_t index, bool boot_code_claim_live, bool reject_live) {
-    /* The cue is the LOWEST-priority painter of the channel LEDs, so the rule is
-     * simply "it owns the index, and no higher-priority live claim does". The
-     * two live claims are the exclusive boot code and the link-state cue. */
-    if (!painter_owns_index(WLS_LED_PAINTER_CHANNEL_CUE, index)) {
+bool wls_led_may_write(wls_led_painter_t painter, uint8_t index, bool any_exclusive_claim_live, bool reject_live) {
+    /* "Does this painter own the index at all?" is the first question: a painter
+     * that does not own the index (nor, being the sentinel path, the sentinel)
+     * may never write it, whatever the live claims are. */
+    if (!painter_owns_index(painter, index)) {
         return false;
     }
-    if (boot_code_claim_live) {
+
+    /* An exclusive painter preempts the rest, not the other way round: while the
+     * boot code or the RGBR_PLAY effect is live it owns the frame, and the shell
+     * orders the exclusive owners by asking FIRST (`wls_frame_owner_of`). So an
+     * exclusive painter is never blocked by the exclusive claim here -- the
+     * claim that suppressed the others is the same claim that let this painter
+     * run. */
+    if (wls_led_painter_is_exclusive(painter)) {
+        return true;
+    }
+
+    /* A live exclusive claim owns every index, so no non-exclusive painter may
+     * write anything while it holds the frame. */
+    if (any_exclusive_claim_live) {
         return false;
     }
+
+    /* The link-state cue owns 17/18/19 while REJECT is live, and the channel
+     * painters share those LEDs. A painter BELOW the link-state cue (by the
+     * precedence) defers to it on the LEDs it owns; a painter ABOVE it does not.
+     * Walking the one precedence list: if `painter` is reached first it is above
+     * the link cue and may write; if the link cue is reached first, `painter` is
+     * below it and may write only if `painter` IS the link cue. */
     if (reject_live && painter_owns_index(WLS_LED_PAINTER_LINK_STATE, index)) {
-        return false;
+        for (size_t i = 0; i < sizeof(wls_led_painter_precedence) / sizeof(wls_led_painter_precedence[0]); i++) {
+            if (wls_led_painter_precedence[i] == painter) {
+                return true;
+            }
+            if (wls_led_painter_precedence[i] == WLS_LED_PAINTER_LINK_STATE) {
+                return painter == WLS_LED_PAINTER_LINK_STATE;
+            }
+        }
     }
+
     return true;
+}
+
+bool wls_led_can_paint(uint8_t index, bool boot_code_claim_live, bool reject_live) {
+    /* The cue is the LOWEST-priority painter of the channel LEDs, so its rule is
+     * exactly `wls_led_may_write` for itself. Kept as its own entry point (the
+     * index first) because that is the ordering the cue's call site uses, but
+     * the rule has one home. Pure. */
+    return wls_led_may_write(WLS_LED_PAINTER_CHANNEL_CUE, index, boot_code_claim_live, reject_live);
 }

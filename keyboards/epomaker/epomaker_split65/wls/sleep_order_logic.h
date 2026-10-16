@@ -24,18 +24,18 @@
 /* The timing state: 0 = not armed; otherwise the moment the arm began. */
 typedef struct {
     uint32_t armed_ms;
-} wls_sleep_order_t;
+} wls_sleep_arm_t;
 
-#define WLS_SLEEP_ORDER_IDLE ((wls_sleep_order_t){0})
+#define WLS_SLEEP_ARM_IDLE ((wls_sleep_arm_t){0})
 
 typedef enum {
-    WLS_SLEEP_ORDER_HOLD = 0, /* nothing to do; keep the state as returned */
-    WLS_SLEEP_ORDER_NOW,      /* order sleep (and the state is reset) */
-} wls_sleep_order_out_t;
+    WLS_SLEEP_ARM_HOLD = 0, /* nothing to do; keep the state as returned */
+    WLS_SLEEP_ARM_NOW,      /* order sleep (and the state is reset) */
+} wls_sleep_arm_out_t;
 
 /* Advance the timing state for one tick. `critical` means the level is at or
  * below the stop threshold (and not charging) -- i.e. the arm condition holds.
  * Mutates `s` in place: arms on the first critical tick, clears when not
  * critical, and clears when it fires. Returns whether to order sleep now. Pure:
  * depends only on (`*s`, `critical`, `now_ms`). */
-wls_sleep_order_out_t wls_sleep_order_tick(wls_sleep_order_t *s, bool critical, uint32_t now_ms);
+wls_sleep_arm_out_t wls_sleep_arm_tick(wls_sleep_arm_t *s, bool critical, uint32_t now_ms);

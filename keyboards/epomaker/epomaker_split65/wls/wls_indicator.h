@@ -5,6 +5,8 @@
 
 #include QMK_KEYBOARD_H
 
+#include "wls/indicator_logic.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -87,6 +89,28 @@ void wls_indicator_boot_code(void);
 
 /* Dismiss the boot code (a keypress, or the timeout). Idempotent. */
 void wls_indicator_boot_code_dismiss(void);
+
+/* --- the LED write chokepoint (D3/D4's unrepresentable rung) -------------------
+ *
+ * The ONE way a painter writes the matrix. Every indicator in this file, and the
+ * caps/win-lock/marker paints in the board file, go through here; the write asks
+ * the core's `wls_led_may_write(painter, index, ...)` before touching the LEDs,
+ * so "a painter writes an LED it does not own" is refused rather than merely
+ * caught by a rule test. The exclusive-claim and REJECT facts are gathered here
+ * (they are runtime state the pure core cannot read), and a refused write is
+ * dropped, never acted on.
+ *
+ * `index` is a real LED index; use `wls_indicator_led_write_all` for the
+ * all-LEDs painters (it passes the `WLS_LED_INDEX_ALL` sentinel). */
+void wls_indicator_led_write(wls_led_painter_t painter, uint8_t index, uint8_t r, uint8_t g, uint8_t b);
+void wls_indicator_led_write_all(wls_led_painter_t painter, uint8_t r, uint8_t g, uint8_t b);
+
+/* Whether an exclusive claim (the boot code, or the RGBR_PLAY effect) currently
+ * owns the frame, and whether the link is REJECT. Exposed because the board file
+ * asks them to decide whether to run the battery painter at all -- the same two
+ * facts the chokepoint itself uses, from one home. */
+bool wls_indicator_led_claim_live(void);
+bool wls_indicator_led_reject_live(void);
 
 /* The transport confirmation flash is armed from the mode-switch edge; exposed
  * for the lifecycle concern. */

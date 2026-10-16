@@ -9,6 +9,7 @@
 #include "wls/sleep_order_logic.h"
 #include "wls/transport_logic.h"
 #include "wls/boot_code_logic.h"
+#include "rgb_record/rgb_record.h"
 #include "quantum.h"
 
 #ifdef WIRELESS_ENABLE
@@ -52,6 +53,56 @@ static void wls_indicator_set(uint8_t index, RGB rgb, uint32_t interval, uint8_t
     wls_indicator.rgb   = rgb;
 }
 
+/* --- the LED write chokepoint -------------------------------------------------
+ *
+ * Every painter in this file writes through `wls_indicator_led_write`, which asks the
+ * core's `wls_led_may_write` before touching the matrix. Before this, each
+ * painter called `rgb_matrix_set_color*` directly, so "a painter writes an LED
+ * it does not own" was caught only by the core's *rule* tests -- a wrong write
+ * still reached the matrix. Now the write itself is gated: the violation is
+ * unwritable, not merely testable (D3/D4's unrepresentable rung).
+ *
+ * The two facts the core cannot read are gathered here. `rgbrec_is_started()` is
+ * RGBR_PLAY's liveness -- it writes the whole matrix as a QMK custom effect, so
+ * it is an exclusive claim exactly like the boot code, and while it is live the
+ * battery painter (and every other non-exclusive painter) defers to it. That is
+ * the rule `epomaker_split65.c` used to state positionally with
+ * `!rgbrec_is_started()`.
+ *
+ * A refused write is REPORTED, never acted on: a monitor that changed behaviour
+ * could perturb the trace it observes (the shape this project's livelock review
+ * forbids). Reporting is behind the same diagnostic the rest of the shell uses.
+ */
+bool wls_indicator_led_claim_live(void) {
+#ifdef WIRELESS_ENABLE
+    return wls_indicator_boot_code_owns_matrix() || rgbrec_is_started();
+#else
+    return wls_indicator_boot_code_owns_matrix();
+#endif
+}
+
+bool wls_indicator_led_reject_live(void) {
+#ifdef WIRELESS_ENABLE
+    return hsm_link_state_of_md((uint8_t)*md_getp_state()) == HSM_LINK_REJECT;
+#else
+    return false;
+#endif
+}
+
+void wls_indicator_led_write(wls_led_painter_t painter, uint8_t index, uint8_t r, uint8_t g, uint8_t b) {
+    if (!wls_led_may_write(painter, index, wls_indicator_led_claim_live(), wls_indicator_led_reject_live())) {
+        return;
+    }
+    rgb_matrix_set_color(index, r, g, b);
+}
+
+void wls_indicator_led_write_all(wls_led_painter_t painter, uint8_t r, uint8_t g, uint8_t b) {
+    if (!wls_led_may_write(painter, WLS_LED_INDEX_ALL, wls_indicator_led_claim_live(), wls_indicator_led_reject_live())) {
+        return;
+    }
+    rgb_matrix_set_color_all(r, g, b);
+}
+
 void wls_indicator_wls_set(uint8_t index, RGB rgb, uint32_t interval, uint8_t times) {
     wls_indicator_set(index, rgb, interval, times);
 }
@@ -93,9 +144,9 @@ void wls_indicator_channel_flash(void) {
     }
 
     if (out.on) {
-        rgb_matrix_set_color(wls_indicator.index, wls_indicator.rgb.r, wls_indicator.rgb.g, wls_indicator.rgb.b);
+        wls_indicator_led_write(WLS_LED_PAINTER_CHANNEL_FLASH, wls_indicator.index, wls_indicator.rgb.r, wls_indicator.rgb.g, wls_indicator.rgb.b);
     } else {
-        rgb_matrix_set_color(wls_indicator.index, 0x00, 0x00, 0x00);
+        wls_indicator_led_write(WLS_LED_PAINTER_CHANNEL_FLASH, wls_indicator.index, 0x00, 0x00, 0x00);
     }
 }
 
@@ -124,15 +175,15 @@ void wls_indicator_battery_blink(void) {
         }
 
         if (out.on) {
-            rgb_matrix_set_color(hs_rgb_bat[i].index, hs_rgb_bat[i].rgb.r, hs_rgb_bat[i].rgb.g, hs_rgb_bat[i].rgb.b);
+            wls_indicator_led_write(WLS_LED_PAINTER_BATTERY, hs_rgb_bat[i].index, hs_rgb_bat[i].rgb.r, hs_rgb_bat[i].rgb.g, hs_rgb_bat[i].rgb.b);
         } else {
-            rgb_matrix_set_color(hs_rgb_bat[i].index, 0x00, 0x00, 0x00);
+            wls_indicator_led_write(WLS_LED_PAINTER_BATTERY, hs_rgb_bat[i].index, 0x00, 0x00, 0x00);
         }
     }
 }
 
 void wls_indicator_battery(void) {
-    static wls_sleep_order_t sleep_order = WLS_SLEEP_ORDER_IDLE;
+    static wls_sleep_arm_t sleep_arm = WLS_SLEEP_ARM_IDLE;
     uint8_t                  bat_level   = *md_getp_bat();
 
     if (!is_keyboard_master()) {
@@ -145,8 +196,8 @@ void wls_indicator_battery(void) {
      * than a single dim LED. */
     if (rgb_matrix_get_val() != 0) {
         wls_bat_rgb_t rgb = wls_bat_rgb_of(wls_bat_colour_of(charging_state, bat_full_flag, bat_level));
-        rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX, rgb.r, rgb.g, rgb.b);
-        rgb_matrix_set_color(HS_MATRIX_BAT_SOFT_INDEX2, rgb.r, rgb.g, rgb.b);
+        wls_indicator_led_write(WLS_LED_PAINTER_BATTERY, HS_MATRIX_BAT_SOFT_INDEX, rgb.r, rgb.g, rgb.b);
+        wls_indicator_led_write(WLS_LED_PAINTER_BATTERY, HS_MATRIX_BAT_SOFT_INDEX2, rgb.r, rgb.g, rgb.b);
     }
 
     /* The *what to do* is the pure `wls_bat_action_of()`; this is only the
@@ -158,10 +209,10 @@ void wls_indicator_battery(void) {
 
     switch (action) {
         case WLS_BAT_ACT_PAINT_RED:
-            rgb_matrix_set_color(HS_MATRIX_BLINK_INDEX_BAT, 0xFF, 0x00, 0x00);
+            wls_indicator_led_write(WLS_LED_PAINTER_BATTERY, HS_MATRIX_BLINK_INDEX_BAT, 0xFF, 0x00, 0x00);
             break;
         case WLS_BAT_ACT_PAINT_GREEN:
-            rgb_matrix_set_color(HS_MATRIX_BLINK_INDEX_BAT, 0x00, 0xFF, 0x00);
+            wls_indicator_led_write(WLS_LED_PAINTER_BATTERY, HS_MATRIX_BLINK_INDEX_BAT, 0x00, 0xFF, 0x00);
             break;
         case WLS_BAT_ACT_BLINK_RED:
             rgb_matrix_hs_bat_set(HS_MATRIX_BLINK_INDEX_BAT, (RGB){0xFF, 0x00, 0x00}, 250, 1);
@@ -172,17 +223,17 @@ void wls_indicator_battery(void) {
     }
 
     /* The timing (arm on first critical sight, fire once the window elapses) is
-     * the pure `wls_sleep_order_tick()`; the *whether* is the pure
+     * the pure `wls_sleep_arm_tick()`; the *whether* is the pure
      * `hsm_should_order_sleep()`. */
     if (critical) {
-        if (wls_sleep_order_tick(&sleep_order, true, timer_read32()) == WLS_SLEEP_ORDER_NOW) {
+        if (wls_sleep_arm_tick(&sleep_arm, true, timer_read32()) == WLS_SLEEP_ARM_NOW) {
             if (hsm_should_order_sleep(bat_level, charging_state, BATTERY_CAPACITY_STOP)) {
                 wls_order_sleep(true);
                 lpwr_set_timeout_manual(true);
             }
         }
     } else {
-        (void)wls_sleep_order_tick(&sleep_order, false, timer_read32());
+        (void)wls_sleep_arm_tick(&sleep_arm, false, timer_read32());
     }
 }
 
@@ -256,9 +307,9 @@ void wls_indicator_set_flash(void) {
         uint8_t g = out.on ? hs_rgb_indicators[i].rgb.g : 0x00;
         uint8_t b = out.on ? hs_rgb_indicators[i].rgb.b : 0x00;
         if (hs_rgb_indicators[i].index == 0xFF) {
-            rgb_matrix_set_color_all(r, g, b);
+            wls_indicator_led_write_all(WLS_LED_PAINTER_SET_FLASH, r, g, b);
         } else {
-            rgb_matrix_set_color(hs_rgb_indicators[i].index, r, g, b);
+            wls_indicator_led_write(WLS_LED_PAINTER_SET_FLASH, hs_rgb_indicators[i].index, r, g, b);
         }
     }
 }
@@ -352,9 +403,9 @@ void wls_indicator_link_state(void) {
 
     RGB dim_red = {0x40, 0x00, 0x00};
 
-    rgb_matrix_set_color(HS_RGB_BLINK_INDEX_BT1, dim_red.r, dim_red.g, dim_red.b);
-    rgb_matrix_set_color(HS_RGB_BLINK_INDEX_BT2, dim_red.r, dim_red.g, dim_red.b);
-    rgb_matrix_set_color(HS_RGB_BLINK_INDEX_BT3, dim_red.r, dim_red.g, dim_red.b);
+    wls_indicator_led_write(WLS_LED_PAINTER_LINK_STATE, HS_RGB_BLINK_INDEX_BT1, dim_red.r, dim_red.g, dim_red.b);
+    wls_indicator_led_write(WLS_LED_PAINTER_LINK_STATE, HS_RGB_BLINK_INDEX_BT2, dim_red.r, dim_red.g, dim_red.b);
+    wls_indicator_led_write(WLS_LED_PAINTER_LINK_STATE, HS_RGB_BLINK_INDEX_BT3, dim_red.r, dim_red.g, dim_red.b);
 }
 
 /* The at-rest channel cue: which channel is live *right now* (X-4).
@@ -376,9 +427,10 @@ void wls_indicator_link_state(void) {
  * BT1/2/3 LEDs on REJECT, the same LEDs this one would light on a BT channel. So
  * REJECT must WIN -- a refused link is the more urgent fact, and letting the
  * steady channel cue paint over it would restore the exact flattening X-30 just
- * removed. This function therefore returns early on REJECT and lets the cue
- * above own those LEDs; on every other state the two are disjoint (the cue above
- * paints nothing).
+ * removed. This function no longer returns early on REJECT; it hands every write
+ * to the chokepoint (`wls_indicator_led_write`), which refuses the ones the live REJECT
+ * claim owns, so the arbitration is the core's rule rather than this function's
+ * first branch.
  *
  * Master-gated: the channel is a property of the board, and the master is the
  * half that holds the transport state (`wireless_get_current_devs()` is
@@ -390,33 +442,25 @@ void wls_indicator_channel_state(void) {
 
     /* REJECT wins these LEDs. The rule -- "the link-state cue outranks the
      * at-rest channel cue on the LEDs they share" -- is stated once in the core
-     * (`wls_led_can_paint`), not by this return's position. Consulting it means
-     * a new higher-priority painter on the same LEDs (or a new reason the
-     * link-state cue is live) defers here automatically, instead of requiring a
-     * reader to notice this early return. The claim's liveness is the runtime
-     * REJECT fact; the ownership is the core's. */
-    bool reject_live = hsm_link_state_of_md((uint8_t)*md_getp_state()) == HSM_LINK_REJECT;
-    if (!wls_led_can_paint(HS_RGB_BLINK_INDEX_BT1, wls_indicator_boot_code_owns_matrix(), reject_live)) {
-        return;
-    }
-
-    /* The steady at-rest intensity. Dim, and distinct from the flash's cadence
-     * and from "nothing": a person glancing down sees one small lit LED and
-     * reads the channel from *which* one it is. */
+     * (`wls_led_may_write`), and every write below asks it. The liveness of the
+     * link cue's claim is the runtime REJECT fact; the ownership is the core's.
+     * No early return here: the chokepoint refuses each write, so a new
+     * higher-priority painter on the same LEDs defers automatically rather than
+     * requiring a reader to notice this function's first branch. */
     RGB cue = {0x10, 0x10, 0x10};
 
     switch (hsm_chan_cue_of(wireless_get_current_devs())) {
         case HSM_CHAN_CUE_BT1:
-            rgb_matrix_set_color(HS_RGB_BLINK_INDEX_BT1, cue.r, cue.g, cue.b);
+            wls_indicator_led_write(WLS_LED_PAINTER_CHANNEL_CUE, HS_RGB_BLINK_INDEX_BT1, cue.r, cue.g, cue.b);
             break;
         case HSM_CHAN_CUE_BT2:
-            rgb_matrix_set_color(HS_RGB_BLINK_INDEX_BT2, cue.r, cue.g, cue.b);
+            wls_indicator_led_write(WLS_LED_PAINTER_CHANNEL_CUE, HS_RGB_BLINK_INDEX_BT2, cue.r, cue.g, cue.b);
             break;
         case HSM_CHAN_CUE_BT3:
-            rgb_matrix_set_color(HS_RGB_BLINK_INDEX_BT3, cue.r, cue.g, cue.b);
+            wls_indicator_led_write(WLS_LED_PAINTER_CHANNEL_CUE, HS_RGB_BLINK_INDEX_BT3, cue.r, cue.g, cue.b);
             break;
         case HSM_CHAN_CUE_2G4:
-            rgb_matrix_set_color(HS_RGB_BLINK_INDEX_2G4, cue.r, cue.g, cue.b);
+            wls_indicator_led_write(WLS_LED_PAINTER_CHANNEL_CUE, HS_RGB_BLINK_INDEX_2G4, cue.r, cue.g, cue.b);
             break;
         case HSM_CHAN_CUE_NONE:
         case HSM_CHAN_CUE_BT4:
@@ -524,15 +568,15 @@ void wls_indicator_boot_code(void) {
         /* Origin not yet stamped: hold black and stamp it now. */
         boot_code_started = timer_read32();
         boot_code_armed   = false;
-        rgb_matrix_set_color_all(0, 0, 0);
+        wls_indicator_led_write_all(WLS_LED_PAINTER_BOOT_CODE, 0, 0, 0);
         return;
     }
 
     wls_boot_code_out_t out = wls_boot_code_at(boot_code_counts, boot_code_started, timer_read32());
     if (out.phase == WLS_BOOT_CODE_PHASE_LIT) {
-        rgb_matrix_set_color_all(out.r, out.g, out.b);
+        wls_indicator_led_write_all(WLS_LED_PAINTER_BOOT_CODE, out.r, out.g, out.b);
     } else {
-        rgb_matrix_set_color_all(0, 0, 0);
+        wls_indicator_led_write_all(WLS_LED_PAINTER_BOOT_CODE, 0, 0, 0);
     }
 }
 

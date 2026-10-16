@@ -178,7 +178,7 @@ wls_frame_owner_t wls_frame_owner_of(bool exclusive_claim_live);
  *      highest priority first. The ORDER IS THE POLICY, restated here so a
  *      reader does not reconstruct arbitration from call order.
  *   2. A painter owns an index when the index is in its declared set; the
- *      all-LEDs painter owns every index.
+ *      all-LEDs painters (the boot code, the RGBR_PLAY effect) own every index.
  *   3. On an overlap the earlier painter (higher priority) wins. The two real
  *      overlaps today are link-state vs channel cue (17/18/19) and channel flash
  *      vs channel cue (the same LEDs); the first is already arbitrated in the
@@ -191,17 +191,29 @@ wls_frame_owner_t wls_frame_owner_of(bool exclusive_claim_live);
 typedef enum {
     WLS_LED_PAINTER_NONE = 0,
     WLS_LED_PAINTER_BOOT_CODE,    /* exclusive: every index (rgb_matrix_set_color_all) */
+    WLS_LED_PAINTER_RGBREC,       /* exclusive: every index (the RGBR_PLAY custom effect) */
     WLS_LED_PAINTER_LINK_STATE,   /* BT1/2/3 (17/18/19): the REJECT cue */
     WLS_LED_PAINTER_CHANNEL_FLASH,/* the transition flash (17/18/19/20, 41/42) */
     WLS_LED_PAINTER_CHANNEL_CUE,  /* the at-rest channel cue (17/18/19/20) */
     WLS_LED_PAINTER_BATTERY,      /* 63/64/65: the battery indicator */
     WLS_LED_PAINTER_SET_FLASH,    /* its armed index, or all (0xFF) */
     WLS_LED_PAINTER_MARKER,       /* the confinfo.filp marker (32) */
+    WLS_LED_PAINTER_CAPS,         /* HS_RGB_INDEX_CAPS (2) */
+    WLS_LED_PAINTER_WIN_LOCK,     /* HS_RGB_INDEX_WIN_LOCK (1) */
 } wls_led_painter_t;
 
 /* The `0xFF` entry index: an armed set-flash that repaints every LED. This is a
  * sentinel, not a real LED, so it must never be compared as an index. */
 #define WLS_LED_INDEX_ALL 0xFFu
+
+/* The last real LED index, so the index space is `0 .. WLS_LED_INDEX_MAX` and
+ * the overlap scan is bounded by the BOARD rather than by a literal that stops
+ * where the last painter happened to write. `keyboard.json`'s
+ * `rgb_matrix.layout` declares 68 entries (indices 0..67); `bin/guard-invariants`
+ * pins this constant to that count, because the core cannot include the firmware
+ * macro that would derive it and a literal that drifts from the board is exactly
+ * the accretion this closes. */
+#define WLS_LED_INDEX_MAX 67u
 
 /* Which painter wins LED `index`, by the precedence above. `index` may be any
  * uint8_t and `WLS_LED_INDEX_ALL` is treated as the wildcard it is.
@@ -237,4 +249,34 @@ bool wls_led_painters_overlap(wls_led_painter_t a, wls_led_painter_t b);
  * is the core's precedence, not the line a `return` sits on. The two liveness
  * facts are passed in because they are runtime state the core cannot read.
  * Returns true when the cue owns the index and no higher live claim does. Pure. */
+bool wls_led_can_paint(uint8_t index, bool boot_code_claim_live, bool reject_live);
+
+/* Whether `painter` may write `index` this frame -- the general form of the rule
+ * above, and the chokepoint every painter site asks.
+ *
+ * This is deliberately NOT "is `painter` the winner of `index`". The winner rule
+ * (`wls_led_painter_of`) answers a different question, and asking it here would
+ * be a livelock: on 17/18/19 the winner is always the higher-priority link-state
+ * cue, so the channel cue would be told it does not own its own LEDs and would
+ * paint nothing. What a painter needs to know is narrower -- "does any
+ * higher-priority painter that is *live right now* also own this index?" -- and
+ * that is a function of (painter, index, the live claims), not of the winner.
+ *
+ * The live claims are the two exclusive ones (the boot code and the RGBR_PLAY
+ * effect, each owning every index while live) plus the link-state cue (owning
+ * 17/18/19 while REJECT is live). A painter that is itself exclusive is never
+ * blocked by these (it preempts them; the shell orders the exclusive owners by
+ * asking first). Passing the facts rather than reading them is the same split as
+ * `wls_led_can_paint`: liveness is runtime state the core cannot see. Pure.
+ *
+ * A false result means "do not write". The shell drops the write and may report
+ * it; it must never let the ask change what it observes. */
+bool wls_led_may_write(wls_led_painter_t painter, uint8_t index, bool any_exclusive_claim_live, bool reject_live);
+
+/* The channel cue's rule, restated in terms of `wls_led_may_write` so there is
+ * one home for "may this painter write this index". Kept because the cue's call
+ * site reads `wls_led_can_paint(index, boot_live, reject_live)` -- the index
+ * first -- and that ordering is the one the shell already uses. The boot code is
+ * the only exclusive claim that blocks the cue (the RGBR_PLAY effect, when live,
+ * has already suppressed the whole pass before the cue runs). Pure. */
 bool wls_led_can_paint(uint8_t index, bool boot_code_claim_live, bool reject_live);

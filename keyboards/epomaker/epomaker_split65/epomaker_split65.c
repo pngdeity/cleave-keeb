@@ -239,9 +239,9 @@ bool rgb_matrix_indicators_advanced_kb(uint8_t led_min, uint8_t led_max) {
         wls_ee_clr_timer = 0;
     }
 
-    if (host_keyboard_led_state().caps_lock) rgb_matrix_set_color(HS_RGB_INDEX_CAPS, 0x20, 0x20, 0x20);
+    if (host_keyboard_led_state().caps_lock) wls_indicator_led_write(WLS_LED_PAINTER_CAPS, HS_RGB_INDEX_CAPS, 0x20, 0x20, 0x20);
 
-    if (!keymap_is_mac_system() && keymap_config.no_gui) rgb_matrix_set_color(HS_RGB_INDEX_WIN_LOCK, 0x20, 0x20, 0x20);
+    if (!keymap_is_mac_system() && keymap_config.no_gui) wls_indicator_led_write(WLS_LED_PAINTER_WIN_LOCK, HS_RGB_INDEX_WIN_LOCK, 0x20, 0x20, 0x20);
 
 #ifdef RGBLIGHT_ENABLE
     if (rgb_matrix_indicators_advanced_rgblight(led_min, led_max) != true) {
@@ -286,15 +286,22 @@ bool rgb_matrix_indicators_advanced_kb(uint8_t led_min, uint8_t led_max) {
     /* While suppressed (post-reset) the battery indicator is hidden; the
      * suppression is a deadline, so it simply expires — no re-arm, no flag to
      * flip back. Otherwise the indicator is shown and its own bounded blink
-     * (wls_indicator_battery_blink) drives the cadence. */
-    if (timer_read32() >= wls_bat_suppress_deadline() && !rgbrec_is_started()) {
+     * (wls_indicator_battery_blink) drives the cadence.
+     *
+     * The RGBR_PLAY effect writes the whole matrix as a QMK custom effect, so it
+     * is an exclusive frame owner exactly like the boot code: while either is
+     * live, the battery painter does not run. Asking the chokepoint's own fact
+     * (`wls_indicator_led_claim_live`) rather than a positional
+     * `!rgbrec_is_started()` test makes "an exclusive claim suppresses the
+     * battery" a rule, not the shape of this `if`. */
+    if (timer_read32() >= wls_bat_suppress_deadline() && !wls_indicator_led_claim_live()) {
         wls_indicator_battery_blink();
         wls_indicator_battery();
     }
 #endif
 
     wls_indicator_set_flash();
-    if (confinfo.filp) rgb_matrix_set_color(32, RGB_MATRIX_MAXIMUM_BRIGHTNESS, RGB_MATRIX_MAXIMUM_BRIGHTNESS, RGB_MATRIX_MAXIMUM_BRIGHTNESS);
+    if (confinfo.filp) wls_indicator_led_write(WLS_LED_PAINTER_MARKER, 32, RGB_MATRIX_MAXIMUM_BRIGHTNESS, RGB_MATRIX_MAXIMUM_BRIGHTNESS, RGB_MATRIX_MAXIMUM_BRIGHTNESS);
     query();
     return true;
 }

@@ -30,47 +30,47 @@ extern "C" {
 namespace {
 
 TEST(SleepOrderLogic, first_critical_tick_arms_and_does_not_fire) {
-    wls_sleep_order_t s = WLS_SLEEP_ORDER_IDLE;
-    EXPECT_EQ(WLS_SLEEP_ORDER_HOLD, wls_sleep_order_tick(&s, true, 1000));
+    wls_sleep_arm_t s = WLS_SLEEP_ARM_IDLE;
+    EXPECT_EQ(WLS_SLEEP_ARM_HOLD, wls_sleep_arm_tick(&s, true, 1000));
     EXPECT_EQ(1000u, s.armed_ms);
 }
 
 TEST(SleepOrderLogic, does_not_fire_before_the_arm_window_elapses) {
-    wls_sleep_order_t s = WLS_SLEEP_ORDER_IDLE;
-    (void)wls_sleep_order_tick(&s, true, 1000);
-    EXPECT_EQ(WLS_SLEEP_ORDER_HOLD, wls_sleep_order_tick(&s, true, 1000 + WLS_SLEEP_ORDER_ARM_MS - 1));
+    wls_sleep_arm_t s = WLS_SLEEP_ARM_IDLE;
+    (void)wls_sleep_arm_tick(&s, true, 1000);
+    EXPECT_EQ(WLS_SLEEP_ARM_HOLD, wls_sleep_arm_tick(&s, true, 1000 + WLS_SLEEP_ORDER_ARM_MS - 1));
 }
 
 TEST(SleepOrderLogic, fires_exactly_at_the_arm_window_and_clears) {
-    wls_sleep_order_t s = WLS_SLEEP_ORDER_IDLE;
-    (void)wls_sleep_order_tick(&s, true, 1000);
-    EXPECT_EQ(WLS_SLEEP_ORDER_NOW, wls_sleep_order_tick(&s, true, 1000 + WLS_SLEEP_ORDER_ARM_MS));
+    wls_sleep_arm_t s = WLS_SLEEP_ARM_IDLE;
+    (void)wls_sleep_arm_tick(&s, true, 1000);
+    EXPECT_EQ(WLS_SLEEP_ARM_NOW, wls_sleep_arm_tick(&s, true, 1000 + WLS_SLEEP_ORDER_ARM_MS));
     EXPECT_EQ(0u, s.armed_ms);
 }
 
 TEST(SleepOrderLogic, recovery_clears_the_arm) {
-    wls_sleep_order_t s = WLS_SLEEP_ORDER_IDLE;
-    (void)wls_sleep_order_tick(&s, true, 1000);
-    EXPECT_EQ(WLS_SLEEP_ORDER_HOLD, wls_sleep_order_tick(&s, false, 2000));
+    wls_sleep_arm_t s = WLS_SLEEP_ARM_IDLE;
+    (void)wls_sleep_arm_tick(&s, true, 1000);
+    EXPECT_EQ(WLS_SLEEP_ARM_HOLD, wls_sleep_arm_tick(&s, false, 2000));
     EXPECT_EQ(0u, s.armed_ms);
     /* After recovery the window restarts from the new arm. */
-    (void)wls_sleep_order_tick(&s, true, 5000);
-    EXPECT_EQ(WLS_SLEEP_ORDER_HOLD, wls_sleep_order_tick(&s, true, 5000 + WLS_SLEEP_ORDER_ARM_MS - 1));
+    (void)wls_sleep_arm_tick(&s, true, 5000);
+    EXPECT_EQ(WLS_SLEEP_ARM_HOLD, wls_sleep_arm_tick(&s, true, 5000 + WLS_SLEEP_ORDER_ARM_MS - 1));
 }
 
 TEST(SleepOrderLogic, never_critical_never_fires) {
-    wls_sleep_order_t s = WLS_SLEEP_ORDER_IDLE;
+    wls_sleep_arm_t s = WLS_SLEEP_ARM_IDLE;
     for (uint32_t t = 0; t < 5 * WLS_SLEEP_ORDER_ARM_MS; t += 1000) {
-        EXPECT_EQ(WLS_SLEEP_ORDER_HOLD, wls_sleep_order_tick(&s, false, t));
+        EXPECT_EQ(WLS_SLEEP_ARM_HOLD, wls_sleep_arm_tick(&s, false, t));
     }
     EXPECT_EQ(0u, s.armed_ms);
 }
 
 TEST(SleepOrderLogic, arm_at_time_zero_still_fires) {
-    wls_sleep_order_t s = WLS_SLEEP_ORDER_IDLE;
-    EXPECT_EQ(WLS_SLEEP_ORDER_HOLD, wls_sleep_order_tick(&s, true, 0));
+    wls_sleep_arm_t s = WLS_SLEEP_ARM_IDLE;
+    EXPECT_EQ(WLS_SLEEP_ARM_HOLD, wls_sleep_arm_tick(&s, true, 0));
     EXPECT_NE(0u, s.armed_ms); /* the 0 sentinel is avoided */
-    EXPECT_EQ(WLS_SLEEP_ORDER_NOW, wls_sleep_order_tick(&s, true, WLS_SLEEP_ORDER_ARM_MS + 1));
+    EXPECT_EQ(WLS_SLEEP_ARM_NOW, wls_sleep_arm_tick(&s, true, WLS_SLEEP_ORDER_ARM_MS + 1));
 }
 
 } // namespace

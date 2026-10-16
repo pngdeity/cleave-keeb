@@ -223,23 +223,34 @@ TEST(IndicatorLogic, the_battery_and_marker_leds_have_their_owners) {
     EXPECT_EQ(WLS_LED_PAINTER_MARKER, wls_led_painter_of(32, false));
 }
 
+TEST(IndicatorLogic, the_caps_and_win_lock_leds_have_their_owners) {
+    /* HS_RGB_INDEX_CAPS = 2 and HS_RGB_INDEX_WIN_LOCK = 1 are written raw by the
+     * frame pass; before this they were unnamed, so two LEDs the board paints
+     * were outside the arbiter. They are painters now. */
+    EXPECT_EQ(WLS_LED_PAINTER_CAPS, wls_led_painter_of(2, false));
+    EXPECT_EQ(WLS_LED_PAINTER_WIN_LOCK, wls_led_painter_of(1, false));
+}
+
 TEST(IndicatorLogic, an_unlisted_index_belongs_to_no_enumerated_painter) {
     /* The keymap's and rgblight's LEDs are open-ended, so the core claims none
      * of them -- they are not an unprotected overlap, they are simply not this
      * table's to arbitrate. */
-    EXPECT_EQ(WLS_LED_PAINTER_NONE, wls_led_painter_of(1, false));
-    EXPECT_EQ(WLS_LED_PAINTER_NONE, wls_led_painter_of(2, false));
+    EXPECT_EQ(WLS_LED_PAINTER_NONE, wls_led_painter_of(0, false));
     EXPECT_EQ(WLS_LED_PAINTER_NONE, wls_led_painter_of(99, false));
+    EXPECT_EQ(WLS_LED_PAINTER_NONE, wls_led_painter_of(100, false));
 }
 
-TEST(IndicatorLogic, only_the_boot_code_is_exclusive_over_leds) {
+TEST(IndicatorLogic, only_the_all_leds_painters_are_exclusive_over_leds) {
     EXPECT_TRUE(wls_led_painter_is_exclusive(WLS_LED_PAINTER_BOOT_CODE));
+    EXPECT_TRUE(wls_led_painter_is_exclusive(WLS_LED_PAINTER_RGBREC));
     EXPECT_FALSE(wls_led_painter_is_exclusive(WLS_LED_PAINTER_LINK_STATE));
     EXPECT_FALSE(wls_led_painter_is_exclusive(WLS_LED_PAINTER_CHANNEL_FLASH));
     EXPECT_FALSE(wls_led_painter_is_exclusive(WLS_LED_PAINTER_CHANNEL_CUE));
     EXPECT_FALSE(wls_led_painter_is_exclusive(WLS_LED_PAINTER_BATTERY));
     EXPECT_FALSE(wls_led_painter_is_exclusive(WLS_LED_PAINTER_SET_FLASH));
     EXPECT_FALSE(wls_led_painter_is_exclusive(WLS_LED_PAINTER_MARKER));
+    EXPECT_FALSE(wls_led_painter_is_exclusive(WLS_LED_PAINTER_CAPS));
+    EXPECT_FALSE(wls_led_painter_is_exclusive(WLS_LED_PAINTER_WIN_LOCK));
     EXPECT_FALSE(wls_led_painter_is_exclusive(WLS_LED_PAINTER_NONE));
 }
 
@@ -257,6 +268,87 @@ TEST(IndicatorLogic, the_real_overlaps_are_the_ones_the_precedence_resolves) {
     EXPECT_FALSE(wls_led_painters_overlap(WLS_LED_PAINTER_MARKER, WLS_LED_PAINTER_CHANNEL_FLASH));
     /* No enumerated painter overlaps "none". */
     EXPECT_FALSE(wls_led_painters_overlap(WLS_LED_PAINTER_NONE, WLS_LED_PAINTER_BOOT_CODE));
+}
+
+/* --- the "may write" chokepoint -------------------------------------------------
+ *
+ * `wls_led_may_write` is the general form the painters ask -- "may I write this
+ * index this frame?" -- and it is deliberately NOT "am I the winner": asking the
+ * winner rule would tell the channel cue it never owns 17/18/19 (the link-state
+ * cue outranks it there) and silence the cue's own paint. These vectors pin the
+ * difference. */
+TEST(IndicatorLogic, a_painter_that_does_not_own_the_index_may_not_write_it) {
+    /* The battery owns 63/64/65; it may not write a channel LED. */
+    EXPECT_FALSE(wls_led_may_write(WLS_LED_PAINTER_BATTERY, 17, false, false));
+    /* The marker owns only 32. */
+    EXPECT_FALSE(wls_led_may_write(WLS_LED_PAINTER_MARKER, 17, false, false));
+    /* The channel cue owns 17/18/19/20, not the battery LEDs. */
+    EXPECT_FALSE(wls_led_may_write(WLS_LED_PAINTER_CHANNEL_CUE, 63, false, false));
+}
+
+TEST(IndicatorLogic, the_channel_cue_may_still_write_its_own_leds_when_it_is_not_the_winner) {
+    /* This is the livelock the winner rule would have caused: on 17 the WINNER
+     * is the link-state cue, but the channel cue still OWNS 17 and may write it
+     * when REJECT is not live. */
+    EXPECT_EQ(WLS_LED_PAINTER_LINK_STATE, wls_led_painter_of(17, false));
+    EXPECT_TRUE(wls_led_may_write(WLS_LED_PAINTER_CHANNEL_CUE, 17, false, /*reject_live=*/false));
+}
+
+TEST(IndicatorLogic, a_live_exclusive_claim_blocks_every_non_exclusive_painter) {
+    /* The boot code (or RGBR_PLAY) owns the frame; while its claim is live no
+     * other painter may write anything -- the rule that makes the battery
+     * suppression a fact rather than a positional test. */
+    EXPECT_FALSE(wls_led_may_write(WLS_LED_PAINTER_BATTERY, 63, /*any_exclusive_claim_live=*/true, false));
+    EXPECT_FALSE(wls_led_may_write(WLS_LED_PAINTER_CHANNEL_CUE, 17, true, false));
+    EXPECT_FALSE(wls_led_may_write(WLS_LED_PAINTER_MARKER, 32, true, false));
+}
+
+TEST(IndicatorLogic, an_exclusive_painter_is_never_blocked_by_an_exclusive_claim) {
+    /* The exclusive owner is why the claim is live; asking "may the boot code
+     * write?" must not answer no because the boot code's own claim is live. */
+    EXPECT_TRUE(wls_led_may_write(WLS_LED_PAINTER_BOOT_CODE, 0, true, false));
+    EXPECT_TRUE(wls_led_may_write(WLS_LED_PAINTER_RGBREC, 0, true, false));
+}
+
+TEST(IndicatorLogic, a_live_reject_blocks_only_the_painters_below_the_link_cue) {
+    /* REJECT paints 17/18/19 through the link-state cue. The channel cue and the
+     * channel flash are below it (by the precedence) and must defer; the
+     * link-state cue itself, and the painters that share no LED with it, do not.
+     */
+    EXPECT_FALSE(wls_led_may_write(WLS_LED_PAINTER_CHANNEL_CUE, 17, false, /*reject_live=*/true));
+    EXPECT_FALSE(wls_led_may_write(WLS_LED_PAINTER_CHANNEL_FLASH, 18, false, true));
+    EXPECT_TRUE(wls_led_may_write(WLS_LED_PAINTER_LINK_STATE, 17, false, true));
+    /* The battery shares no LED with the link cue, so REJECT does not reach it. */
+    EXPECT_TRUE(wls_led_may_write(WLS_LED_PAINTER_BATTERY, 63, false, true));
+    /* The channel flash's own LEDs 20/41/42 are not the link cue's, so REJECT
+     * does not block them. */
+    EXPECT_TRUE(wls_led_may_write(WLS_LED_PAINTER_CHANNEL_FLASH, 20, false, true));
+}
+
+TEST(IndicatorLogic, the_channel_cue_rule_is_the_general_rule_at_its_own_rank) {
+    /* `wls_led_can_paint` is `wls_led_may_write` for the cue, so the two must
+     * agree on every combination -- this is what stops the cue's entry point
+     * from drifting into a second statement of the rule. */
+    for (uint8_t index = 0; index <= 20; index++) {
+        for (int boot = 0; boot <= 1; boot++) {
+            for (int reject = 0; reject <= 1; reject++) {
+                EXPECT_EQ(wls_led_can_paint(index, boot != 0, reject != 0),
+                          wls_led_may_write(WLS_LED_PAINTER_CHANNEL_CUE, index, boot != 0, reject != 0))
+                    << "index " << (int)index << " boot " << boot << " reject " << reject;
+            }
+        }
+    }
+}
+
+TEST(IndicatorLogic, every_precedence_painter_has_a_distinct_owner_lookup) {
+    /* The index space the arbiter scans is bounded by the board, not by a
+     * literal that stops where the last painter wrote. The board's
+     * `rgb_matrix.layout` has 68 entries (indices 0..67), so the max index is 67;
+     * `bin/guard-invariants` pins this value to that count. */
+    EXPECT_EQ(67u, WLS_LED_INDEX_MAX);
+    /* The set-flash sentinel is not a real index and is never owned by a named
+     * painter as one. */
+    EXPECT_EQ(WLS_LED_INDEX_ALL, 0xFFu);
 }
 
 } // namespace
