@@ -80,6 +80,13 @@ bool lpwr_pads_collide(uint8_t pad_a, uint8_t pad_b) {
     return pad_a == pad_b;
 }
 
+bool lpwr_arm_is_coherent(bool orders_sleep, bool arms_timeout) {
+    /* An order without an arm can never be taken, so it is incoherent. An arm
+     * without an order is fine: the stop policy refuses the unordered stop, so
+     * nothing unsafe happens -- that is exactly the S1 case. */
+    return !orders_sleep || arms_timeout;
+}
+
 bool lpwr_timeout_allowed_decide(bool hook_allows, bool usb_active, bool manual_pending, bool idle_elapsed) {
     /* A board hook may forbid the idle timeout outright (including a pending
      * manual override: the board knows a stop would be unsafe). A live USB host

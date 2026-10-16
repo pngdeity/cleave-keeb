@@ -355,3 +355,58 @@ TEST_F(LowpowerLogicTest, every_unregistered_pad_reports_the_armed_default) {
             << "pad " << (int)p << " code " << code;
     }
 }
+
+/* --- The arm sites and their ordering (D8) ---------------------------------
+ *
+ * A stop needs two independent flags -- `manual_timeout` (permission) and
+ * `ordered_sleep` (the order) -- set at the same sites. The relationship between
+ * them (an order implies an arm; an arm alone is fine because the policy refuses
+ * an unordered stop) was prose in the stop/wake doc's §1 table. These vectors pin
+ * the coherence rule, so a new site that orders without arming fails a test.
+ * See D8 of `TODO.md` "Determination residue". */
+
+TEST_F(LowpowerLogicTest, an_order_must_arm_the_timeout_path) {
+    /* The incoherent combination: a site that orders a sleep but does not arm
+     * the timeout path. The order can never be acted on -- the machine never
+     * reaches PRESLEEP -- so the site's intent and its power effect disagree. */
+    EXPECT_FALSE(lpwr_arm_is_coherent(/*orders*/ true, /*arms*/ false));
+}
+
+TEST_F(LowpowerLogicTest, ordering_and_arming_together_is_coherent) {
+    /* Both real ordering sites (the low-battery path, the slave's 0xAA handler)
+     * do both, in this order. */
+    EXPECT_TRUE(lpwr_arm_is_coherent(/*orders*/ true, /*arms*/ true));
+}
+
+TEST_F(LowpowerLogicTest, an_arm_without_an_order_is_coherent) {
+    /* The link-watch sites (`HSM_LINK_ACT_RECONNECT` / `_SLEEP`) arm the timeout
+     * path without ordering: legitimate, because the stop policy refuses the
+     * unordered stop. This is the S1 shape, and it must read as coherent -- the
+     * fix was to refuse the stop, not to forbid the arm. */
+    EXPECT_TRUE(lpwr_arm_is_coherent(/*orders*/ false, /*arms*/ true));
+    EXPECT_TRUE(lpwr_arm_is_coherent(/*orders*/ false, /*arms*/ false));
+}
+
+TEST_F(LowpowerLogicTest, the_ordering_sites_are_composed_coherently) {
+    /* Composed the way the shell composes each real site, through the two
+     * deciders: a site is coherent when, if it orders, the policy would permit
+     * the stop it enables. */
+    struct {
+        const char *name;
+        bool        orders;
+        bool        arms;
+    } sites[] = {
+        {"low-battery order (wls_indicator.c)", true, true},
+        {"slave 0xAA handler (wls_split.c)", true, true},
+        {"link-watch reconnect (wls.c)", false, true},
+        {"link-watch sleep (wls.c)", false, true},
+    };
+    for (auto &s : sites) {
+        EXPECT_TRUE(lpwr_arm_is_coherent(s.orders, s.arms)) << s.name;
+        // A site that orders must, composed with the policy, yield a permitted
+        // stop -- because it also armed.
+        if (s.orders) {
+            EXPECT_TRUE(lpwr_stop_is_allowed_decide(/*master*/ true, /*ordered*/ s.orders)) << s.name;
+        }
+    }
+}

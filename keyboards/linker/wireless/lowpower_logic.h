@@ -112,6 +112,32 @@ uint8_t lpwr_pad_of_code(const lpwr_attribution_t *attr, uint32_t code, bool is_
 bool lpwr_pads_collide(uint8_t pad_a, uint8_t pad_b);
 
 /* ---------------------------------------------------------------------------
+ * The two arm flags and their ordering (the "arm site" rule).
+ *
+ * A stop needs two independent things, and they are set at the same sites in a
+ * fixed relationship:
+ *
+ *   `manual_timeout` -- PERMISSION to take a timeout-path stop at all. It is not
+ *                       an order; it arms the idle-timeout path so the machine
+ *                       may reach PRESLEEP.
+ *   `ordered_sleep`  -- the ORDER: this half has been told to stop (the stop
+ *                       policy is `lpwr_stop_is_allowed_decide(master, ordered)`).
+ *
+ * The rule, and the reason the two are not one flag: **an order implies an arm,
+ * but an arm does not imply an order.** Every site that orders a sleep must also
+ * arm the timeout path, or the order can never be acted on; a site that arms
+ * WITHOUT ordering is legitimate and safe, because the stop policy refuses an
+ * unordered stop -- so an armed-but-unordered site reaches PRESLEEP and is then
+ * declined, which is precisely the 30 s dark board of S1 that
+ * `lpwr_presleep_is_allowed_decide` now prevents.
+ *
+ * What was prose (the §1 table in `docs/STATE-MACHINE-stop-wake-split.md`) is
+ * this predicate: given what a site does, is its arm coherent? A site that ORDERS
+ * but does not ARM is incoherent -- its order can never be taken. Every other
+ * combination is coherent. This is D8 of `TODO.md` "Determination residue". */
+bool lpwr_arm_is_coherent(bool orders_sleep, bool arms_timeout);
+
+/* ---------------------------------------------------------------------------
  * Idle-timeout admissibility, as a pure decision.
  *
  * The machine may enter PRESLEEP on an idle timeout, or immediately when a
