@@ -277,12 +277,16 @@ bool wls_lifecycle_lpwr_allow_presleep(void) {
      * is enumerated and in use; tearing it down is never a low-power action.
      * The sibling `lpwr_is_allow_timeout()` (lowpower.c) states the same "on
      * USB" test, so this now agrees with it instead of contradicting it. */
-    if ((wireless_get_current_devs() == DEVS_USB) && (USB_DRIVER.state != USB_ACTIVE)) {
-        if (USB_DRIVER.state != USB_STOP) {
-            usb_power_disconnect();
-            usbDisconnectBus(&USBD1);
-            usbStop(&USBD1);
-        }
+    /* The rule this obeys is `hsm_usb_teardown_is_safe`: a teardown is refused
+     * whenever the line is in use. The read is DELIBERATE -- a line the host is
+     * talking on is never a low-power teardown -- so the remedy is to state the
+     * rule, not to forbid the read. D5 of `TODO.md` "Determination residue". */
+    const bool host_talking = (USB_DRIVER.state == USB_ACTIVE);
+    const bool driver_idle  = (USB_DRIVER.state == USB_STOP);
+    if ((wireless_get_current_devs() == DEVS_USB) && !hsm_usb_teardown_is_safe(host_talking, driver_idle)) {
+        usb_power_disconnect();
+        usbDisconnectBus(&USBD1);
+        usbStop(&USBD1);
     }
     return true;
 }

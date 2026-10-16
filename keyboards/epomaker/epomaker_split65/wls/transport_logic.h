@@ -270,6 +270,31 @@ bool hsm_transport_may_drive_line(bool decision_is_usb);
  * purely so the alphabet is a checkable set rather than a convention. */
 bool hsm_transport_input_is_pure(bool reads_line_state);
 
+/* Whether a TEARDOWN of the USB data line may be performed, given what the
+ * line's own state says.
+ *
+ * This is the ADR's invariant one level out. The input rule above scopes
+ * "nothing in the line's own state may cause a *decision* change" to the
+ * decision; this states the same principle for the one place the line's state
+ * may legitimately cause a *line effect*. The presleep hook tears the driver
+ * down before a stop (`wls_lifecycle.c`), and it asks the line -- `USB_ACTIVE`
+ * -- whether that is safe. That read is deliberate and stays: tearing down a
+ * host that is enumerated and talking is NEVER a low-power action, so the hook
+ * must be able to see it.
+ *
+ * What was missing was the rule, not the read: nothing said when such a read is
+ * allowed to permit a teardown. The rule is that a teardown is refused whenever
+ * the line is in use at EITHER level -- a live host talking (`USB_ACTIVE`) or a
+ * driver that has not yet reached `USB_STOP`. Stating it here, purely, is what
+ * keeps the presleep read from being a bare line-state test no test can reach:
+ * the shell supplies the two booleans it reads, the rule decides, and the
+ * vectors settle the four combinations. D5 of `TODO.md` "Determination
+ * residue"; the site is named in `docs/STATE-MACHINE-transport-authority.md`.
+ *
+ * `host_talking` is "the line is enumerated and in use", `driver_idle` is "the
+ * driver has reached USB_STOP (so there is nothing left to tear down)". */
+bool hsm_usb_teardown_is_safe(bool host_talking, bool driver_idle);
+
 /* Whether the *switch really moved* between two pin reads.
  *
  * `wls.c`'s detector runs every 50 ms and used to ask "is the resolved

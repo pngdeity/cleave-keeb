@@ -741,3 +741,48 @@ TEST_F(TransportLogic, the_two_halves_of_the_invariant_are_independent) {
     EXPECT_FALSE(hsm_transport_may_drive_line(false)); /* demote on a hint: no */
     EXPECT_TRUE(hsm_transport_input_is_pure(false));   /* intent read: yes  */
 }
+
+/* ---------------------------------------------------------------------------
+ * The teardown rule (D5): the ADR's invariant one level out.
+ *
+ * The input rule above scopes "the line's own state may not cause a DECISION
+ * change" to the transport owner. The presleep hook (`wls_lifecycle.c`) performs
+ * the one line EFFECT decided by the line's own state -- it tears the driver down
+ * before a stop and asks `USB_ACTIVE` whether that is safe. The read is
+ * deliberate (a talking host is never a low-power teardown), so the residue is
+ * the missing RULE, not the read. `hsm_usb_teardown_is_safe` states it: a
+ * teardown is refused while the line is in use at either level.
+ * See D5 of `TODO.md` "Determination residue". */
+
+TEST_F(TransportLogic, a_teardown_is_refused_while_a_host_is_talking) {
+    /* The exact defect the gate exists for: `USB_ACTIVE` means the host
+     * enumerated and is in use. Cutting it is never a low-power action -- it is
+     * the disconnect/re-enumerate loop. Refuse. */
+    EXPECT_FALSE(hsm_usb_teardown_is_safe(true, false));
+    EXPECT_FALSE(hsm_usb_teardown_is_safe(true, true));
+}
+
+TEST_F(TransportLogic, a_teardown_is_refused_while_the_driver_is_not_idle) {
+    /* A driver that has not reached USB_STOP still has work in flight; there is
+     * something to tear down, and doing it here races the driver. */
+    EXPECT_FALSE(hsm_usb_teardown_is_safe(false, false));
+}
+
+TEST_F(TransportLogic, a_teardown_is_safe_only_when_quiet_and_settled) {
+    /* The single admitting combination: no host talking AND the driver already
+     * idle. That is the only state in which a low-power teardown is a real
+     * action rather than a cut into a live line. */
+    EXPECT_TRUE(hsm_usb_teardown_is_safe(false, true));
+}
+
+TEST_F(TransportLogic, the_teardown_rule_is_the_negation_of_in_use) {
+    /* Both readings of "in use" must be able to refuse independently: the rule is
+     * not "host talking" alone (which would try to stop a live driver) nor
+     * "driver busy" alone (which would cut a talking host). */
+    for (int host = 0; host <= 1; host++) {
+        for (int idle = 0; idle <= 1; idle++) {
+            const bool in_use = host || !idle;
+            EXPECT_EQ(hsm_usb_teardown_is_safe(host != 0, idle != 0), !in_use);
+        }
+    }
+}

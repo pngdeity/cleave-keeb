@@ -156,6 +156,14 @@ bool hsm_transport_input_is_pure(bool reads_line_state) {
     return !reads_line_state;
 }
 
+bool hsm_usb_teardown_is_safe(bool host_talking, bool driver_idle) {
+    /* A teardown is refused when the line is in use at either level: a live host
+     * is talking, or the driver has not yet settled idle. Both are "this line is
+     * in use"; neither is recoverable by a later low-power action, and a
+     * teardown of a talking host is the reset loop. See the header. */
+    return !host_talking && driver_idle;
+}
+
 bool hsm_switch_moved(hsm_switch_pos_t now_pos, hsm_switch_pos_t last_pos, bool forced) {
     if (forced) {
         return true;
