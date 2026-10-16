@@ -49,8 +49,37 @@ lpwr_state_t lpwr_get_state(void) {
     return lpwr_state;
 }
 
-void lpwr_set_state(lpwr_state_t state) {
+/* The state is written ONLY here, and only from inside this translation unit.
+ *
+ * It used to be a public `lpwr_set_state(state)` free-writer, which meant any
+ * one of six other files could name a target state directly -- including
+ * LPWR_PRESLEEP, the one state whose entry has an irreversible side effect
+ * (`rgb_matrix_disable_noeeprom()`, in `lpwr_presleep_cb()`) that is only undone
+ * on the LPWR_WAKEUP path. A caller that wrote LPWR_PRESLEEP directly would skip
+ * the gate that makes the unsafe order refused before the effect
+ * (`lpwr_presleep_is_allowed_decide`, in `lpwr_task`), and would strand the board
+ * dark exactly as the 30 s fault did.
+ *
+ * Making the transition function `static` removes that possibility by
+ * construction: the unsafe order is no longer *writable*. The public surface
+ * keeps only what an outside caller may legitimately do -- read the state with
+ * `lpwr_get_state()`, and force a wake with `lpwr_request_wakeup()` (which can
+ * only restore, never disable). There is deliberately no way for a caller to
+ * name an arbitrary state. */
+static void lpwr_transition(lpwr_state_t state) {
     lpwr_state = state;
+}
+
+void lpwr_request_wakeup(void) {
+    /* The one state an outside caller may legitimately force: a wake. Used when
+     * a host resumes and the machine would otherwise sit in a sleep state. It
+     * cannot strand anything, because LPWR_WAKEUP is the state whose callback
+     * re-enables the matrix and re-inits suspend; forcing it can only restore,
+     * never disable. Guarded so it is a no-op when already NORMAL. */
+    if (lpwr_get_state() != LPWR_NORMAL) {
+        lpwr_update_timestamp();
+        lpwr_transition(LPWR_WAKEUP);
+    }
 }
 
 lpwr_mode_t lpwr_get_mode(void) {
@@ -132,10 +161,7 @@ bool lpwr_get_timeout_manual(void) {
 void md_receive_host_cb(bool resume) {
 
     if (resume) {
-        if (lpwr_get_state() != LPWR_NORMAL) {
-            lpwr_update_timestamp();
-            lpwr_set_state(LPWR_WAKEUP);
-        }
+        lpwr_request_wakeup();
     } else {
         if (lpwr_get_state() == LPWR_NORMAL) {
             manual_timeout = true;
@@ -265,7 +291,7 @@ void lpwr_stop_cb(void) {
      * later. The default contract allows every stop, so a board that never
      * implements it behaves as before. */
     if (!lpwr_stop_is_allowed()) {
-        lpwr_set_state(LPWR_NORMAL);
+        lpwr_transition(LPWR_NORMAL);
         return;
     }
 
@@ -282,9 +308,9 @@ void lpwr_stop_cb(void) {
      * to LPWR_STOP and hoping) is what keeps lpwr_wakeup_cb() from being
      * skipped, which is what left the half dark and unresponsive. */
     if (lpwr_wakeup_is_real(lpwr_get_sleep_wakeupcd(), lpwr_wakeup_armed_mask())) {
-        lpwr_set_state(LPWR_WAKEUP);
+        lpwr_transition(LPWR_WAKEUP);
     } else {
-        lpwr_set_state(LPWR_STOP);
+        lpwr_transition(LPWR_STOP);
     }
 
     lpwr_stop_hook_post();
@@ -333,7 +359,7 @@ void lpwr_task(void) {
                  * at the point the timeout path is actually taken. */
                 lpwr_set_timeout_manual(false);
                 lpwr_update_timestamp();
-                lpwr_set_state(LPWR_PRESLEEP);
+                lpwr_transition(LPWR_PRESLEEP);
             }
         } break;
         case LPWR_PRESLEEP: {
@@ -350,12 +376,12 @@ void lpwr_task(void) {
                 if (!lpwr_stop_is_allowed()) {
                     lpwr_wakeup_cb();
                     lpwr_update_timestamp();
-                    lpwr_set_state(LPWR_NORMAL);
+                    lpwr_transition(LPWR_NORMAL);
                     break;
                 }
                 lpwr_presleep_cb();
                 lpwr_update_timestamp();
-                lpwr_set_state(LPWR_STOP);
+                lpwr_transition(LPWR_STOP);
             }
         } break;
         case LPWR_STOP: {
@@ -368,7 +394,7 @@ void lpwr_task(void) {
             if (lpwr_is_allow_wakeup()) {
                 lpwr_wakeup_cb();
                 lpwr_update_timestamp();
-                lpwr_set_state(LPWR_NORMAL);
+                lpwr_transition(LPWR_NORMAL);
             }
         } break;
         default:

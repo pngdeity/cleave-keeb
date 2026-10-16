@@ -67,6 +67,14 @@ uint32_t lpwr_get_sleep_wakeupcd(void);
 void lpwr_update_timestamp(void);
 void lpwr_set_timeout_manual(bool enable);
 bool lpwr_get_timeout_manual(void);
-void lpwr_set_state(lpwr_state_t state);
+
+/* Force a wake from outside the machine. The state itself is NOT settable from
+ * here (or from anywhere outside `lowpower.c`): the machine owns its
+ * transitions, so a caller cannot name a state -- in particular cannot enter
+ * LPWR_PRESLEEP, whose side effects are only undone on the wake path. This is a
+ * narrowing of the former public `lpwr_set_state()`; see the rationale at its
+ * definition. */
+void lpwr_request_wakeup(void);
+
 void lpwr_set_mode(lpwr_mode_t mode);
 void lpwr_task(void);
