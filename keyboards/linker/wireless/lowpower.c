@@ -315,7 +315,20 @@ void lpwr_task(void) {
 
     switch (lpwr_get_state()) {
         case LPWR_NORMAL: {
-            if (lpwr_is_allow_timeout()) {
+            /* The stop policy is consulted HERE, before the sleep sequence
+             * begins, and not only at the point of commitment inside
+             * `lpwr_stop_cb()`. PRESLEEP has side effects it cannot undo by
+             * itself (it disables the RGB matrix, `lpwr_presleep_cb()`) and the
+             * only thing that reverses them, `lpwr_wakeup_cb()`, runs in
+             * LPWR_WAKEUP -- a state a refused stop never reaches, because the
+             * refusal returns to LPWR_NORMAL. Consulting the policy only at
+             * commitment therefore let a refused stop strand the board dark
+             * with the matrix off, permanently, until a power cycle. The check
+             * must precede the first irreversible effect, not follow it.
+             *
+             * `lpwr_stop_cb()` keeps its own check: it is the declared point of
+             * commitment and a caller could enter LPWR_STOP by another route. */
+            if (lpwr_presleep_is_allowed_decide(lpwr_is_allow_timeout(), lpwr_stop_is_allowed())) {
                 /* The decision consumed nothing; the override is honored here,
                  * at the point the timeout path is actually taken. */
                 lpwr_set_timeout_manual(false);
@@ -325,6 +338,21 @@ void lpwr_task(void) {
         } break;
         case LPWR_PRESLEEP: {
             if (lpwr_is_allow_presleep()) {
+                /* Re-check the stop policy before taking the irreversible step.
+                 * When the timeout path is entered the policy was already
+                 * consulted, but it can change while the presleep delay runs (an
+                 * ordering, a cable, a mode switch). If it now refuses, the stop
+                 * will be declined in `lpwr_stop_cb()` -- so PRESLEEP's side
+                 * effects would be taken and never undone. Return to NORMAL
+                 * instead, and let the wake path do the rest: `lpwr_wakeup_cb()`
+                 * is not entered from here, so the callback that owns the
+                 * re-enable runs explicitly. */
+                if (!lpwr_stop_is_allowed()) {
+                    lpwr_wakeup_cb();
+                    lpwr_update_timestamp();
+                    lpwr_set_state(LPWR_NORMAL);
+                    break;
+                }
                 lpwr_presleep_cb();
                 lpwr_update_timestamp();
                 lpwr_set_state(LPWR_STOP);

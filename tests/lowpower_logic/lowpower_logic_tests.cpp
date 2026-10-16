@@ -107,3 +107,45 @@ TEST_F(LowpowerLogicTest, timeout_is_allowed_only_when_a_stop_can_be_taken) {
     EXPECT_TRUE(lpwr_timeout_allowed_decide(true, false, false, true));
     EXPECT_FALSE(lpwr_timeout_allowed_decide(true, false, false, false));
 }
+
+/* --- The PRESLEEP sequencing invariant (regression 2026-10-15) -------------
+ *
+ * PRESLEEP disables the RGB matrix and the ONLY thing that re-enables it runs in
+ * LPWR_WAKEUP -- a state a refused stop never reaches, because the refusal
+ * returns to LPWR_NORMAL. Entering PRESLEEP for a stop the policy will decline
+ * therefore stranded the board dark with the matrix off, permanently, until a
+ * power cycle (the 30 s dark board, `TODO.md` § 8).
+ *
+ * The rule is stated here as a pure decision so the sequence is testable, rather
+ * than living as an unguarded `if` in the imperative shell where the fault
+ * happened. */
+
+TEST_F(LowpowerLogicTest, presleep_requires_both_the_timeout_and_a_permitted_stop) {
+    // The fault case: the idle timeout fired, but the board's policy would
+    // refuse the stop. Entering PRESLEEP here takes the matrix down for a stop
+    // that will be declined -- the dark-board bug.
+    EXPECT_FALSE(lpwr_presleep_is_allowed_decide(true, false));
+}
+
+TEST_F(LowpowerLogicTest, presleep_is_allowed_when_the_stop_will_be_taken) {
+    EXPECT_TRUE(lpwr_presleep_is_allowed_decide(true, true));
+}
+
+TEST_F(LowpowerLogicTest, presleep_is_refused_without_the_timeout) {
+    // No reason to sleep at all: never presleep, permitted stop or not.
+    EXPECT_FALSE(lpwr_presleep_is_allowed_decide(false, false));
+    EXPECT_FALSE(lpwr_presleep_is_allowed_decide(false, true));
+}
+
+TEST_F(LowpowerLogicTest, an_unordered_idle_timeout_cannot_reach_presleep) {
+    /* Composed from the real deciders, the way the shell composes them: an idle
+     * timeout on the master with no ordering. `timeout_allowed` is true, but the
+     * stop policy refuses (`lpwr_stop_is_allowed_decide(master, ordered=false)`),
+     * so PRESLEEP must not be entered. This is the exact board state that
+     * produced the 30 s dark board. */
+    bool timeout_allowed = lpwr_timeout_allowed_decide(/*hook*/ true, /*usb*/ false, /*manual*/ false, /*idle*/ true);
+    bool stop_allowed    = lpwr_stop_is_allowed_decide(/*master*/ true, /*ordered*/ false);
+    EXPECT_TRUE(timeout_allowed);
+    EXPECT_FALSE(stop_allowed);
+    EXPECT_FALSE(lpwr_presleep_is_allowed_decide(timeout_allowed, stop_allowed));
+}

@@ -447,6 +447,19 @@ static bool                   boot_code_done    = false;
 static wls_boot_code_counts_t boot_code_counts;
 
 bool wls_indicator_boot_code_owns_matrix(void) {
+    /* The expiry is computed HERE, from the clock, rather than depending on
+     * `wls_indicator_boot_code()` having been called to clear the latch. The
+     * paint used to be the only thing that could end the window, which made the
+     * ownership a state whose only exit was a call the ownership itself
+     * suppresses: the frame pass returns early while this is true, so a starved
+     * pass could never reach the paint that would have cleared it, and every
+     * indicator on the board stayed silent for good. Reading the deadline as a
+     * fact removes that coupling -- a caller that asks this question gets the
+     * right answer whether or not anything has painted. */
+    if (boot_code_active && !boot_code_armed && timer_elapsed32(boot_code_started) >= wls_boot_code_show_ms(boot_code_counts)) {
+        boot_code_active = false;
+        boot_code_done   = true;
+    }
     return boot_code_active;
 }
 
@@ -493,7 +506,11 @@ void wls_indicator_boot_code_start(void) {
 }
 
 void wls_indicator_boot_code(void) {
-    if (!boot_code_active) {
+    /* Ownership is asked for, not assumed: this is the same predicate the frame
+     * pass gates on, so the paint and the pass can never disagree about whether
+     * the code is playing. It also means the deadline is honoured here even if
+     * the latch was never cleared by an earlier paint. */
+    if (!wls_indicator_boot_code_owns_matrix()) {
         return;
     }
     if (boot_code_armed) {
@@ -501,11 +518,6 @@ void wls_indicator_boot_code(void) {
         boot_code_started = timer_read32();
         boot_code_armed   = false;
         rgb_matrix_set_color_all(0, 0, 0);
-        return;
-    }
-    if (timer_elapsed32(boot_code_started) >= wls_boot_code_show_ms(boot_code_counts)) {
-        boot_code_active = false;
-        boot_code_done   = true;
         return;
     }
 

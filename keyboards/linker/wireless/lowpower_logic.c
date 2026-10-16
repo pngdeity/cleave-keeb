@@ -30,3 +30,12 @@ bool lpwr_timeout_allowed_decide(bool hook_allows, bool usb_active, bool manual_
     }
     return manual_pending || idle_elapsed;
 }
+
+bool lpwr_presleep_is_allowed_decide(bool timeout_allowed, bool stop_allowed) {
+    /* Both must hold. The second conjunct is the whole point: PRESLEEP's side
+     * effects are irreversible from inside the sleep sequence, so entering it
+     * for a stop that will later be refused strands the board with the matrix
+     * disabled and no reachable re-enable. A refused stop must be refused here,
+     * before the effects, not at the point of commitment after them. */
+    return timeout_allowed && stop_allowed;
+}

@@ -42,3 +42,22 @@ bool lpwr_wakeup_is_real(uint32_t wake_set, uint32_t armed_mask);
  * Returns true when the machine may proceed to PRESLEEP.
  */
 bool lpwr_timeout_allowed_decide(bool hook_allows, bool usb_active, bool manual_pending, bool idle_elapsed);
+
+/* ---------------------------------------------------------------------------
+ * Whether the machine may enter PRESLEEP, as a pure decision.
+ *
+ * This is the sequencing invariant that the 2026-10-15 dark-board fault was
+ * missing. PRESLEEP has side effects it cannot undo by itself -- it disables the
+ * RGB matrix -- and the only thing that reverses them runs in LPWR_WAKEUP, a
+ * state a REFUSED stop never reaches (the refusal returns to LPWR_NORMAL). So a
+ * stop that would be refused at the point of commitment must be refused BEFORE
+ * the first irreversible effect, not after it.
+ *
+ * `timeout_allowed` — the idle/manual condition permits the sleep sequence.
+ * `stop_allowed`    — the board's stop policy would permit the stop itself.
+ *
+ * Returns true only when both hold. Entering PRESLEEP on `timeout_allowed`
+ * alone is the fault: it takes the side effects and then declines the stop,
+ * leaving the matrix off with no path back.
+ */
+bool lpwr_presleep_is_allowed_decide(bool timeout_allowed, bool stop_allowed);
