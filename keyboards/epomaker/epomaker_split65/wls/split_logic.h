@@ -84,3 +84,39 @@ wls_split_action_t wls_split_decide_slave(uint8_t cmd, const uint8_t body[4]);
  * The rule is "only order the sleep if the wake is reachable on the transport
  * the half will be woken on". Pure: no I/O, no firmware state. */
 bool wls_split_can_order_sleep(bool sends_wake_on_this_transport);
+
+/* ---------------------------------------------------------------------------
+ * The order executor: a handle that cannot exist unless a release is reachable.
+ *
+ * `wls_split_can_order_sleep()` above *refuses* an unsafe order, but nothing
+ * stops a caller from forgetting to ask, or from asking and then sending anyway:
+ * the send (`wls_split_send(WLS_SPLIT_CMD_SLEEP, ...)`) is a plain call that any
+ * code can make. The refusal is a convention, not a precondition.
+ *
+ * This type makes the right a PRECONDITION of constructing the order. The only
+ * way to obtain an executor is `wls_sleep_order_open()`, which returns one ONLY
+ * when the release is reachable on the transport the half is on; when it is not,
+ * there is no executor, and the order cannot be built at all. "An order exists
+ * without a reachable release" is therefore not a state the shell can write --
+ * it is not representable. (This is the S2 rung-3 form; the property that S1's
+ * rung 3 gave the low-power state, given to the cross-half order.)
+ *
+ * The shell still performs the send; what it may not do is decide whether it is
+ * allowed. It asks the handle, and the handle is the answer: a zero handle is a
+ * refusal, and `wls_sleep_order_permitted()` says so in words. */
+typedef struct {
+    bool    permitted;  /* false => no order may be sent (the refusal) */
+    uint8_t sleep_flag; /* the body[0] the slave reads as its ordered-sleep flag */
+} wls_sleep_order_t;
+
+/* Open an order executor for the transport the master is on NOW.
+ * `sends_wake_on_this_transport` is the same fact `wls_split_can_order_sleep()`
+ * takes -- whether the 0xCC release is actually sent on this transport.
+ * `sleep_flag` is the flag the slave will read (`wls_sleep_ordered()` for the
+ * master's own stop). Returns a handle whose `permitted` is exactly the contract
+ * above, so a caller can neither forget the check nor defeat it. Pure. */
+wls_sleep_order_t wls_sleep_order_open(bool sends_wake_on_this_transport, uint8_t sleep_flag);
+
+/* Whether the handle permits the order. Reads only what the open decided: the
+ * answer cannot drift from the transport fact the handle was built from. */
+bool wls_sleep_order_permitted(const wls_sleep_order_t *order);

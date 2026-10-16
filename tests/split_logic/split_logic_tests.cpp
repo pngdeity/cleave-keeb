@@ -82,8 +82,8 @@ TEST(SplitLogic, sync_multimode_clamps_a_corrupt_device_index) {
      * a transport, so 0xFF read as BLUETOOTH. Out of range clamps to USB, the
      * safe floor (it can neither select a wrong wireless profile nor tear the
      * USB line down). */
-    const uint8_t corrupt[4] = {0xFF, 0xFF, 0, 0};
-    wls_split_action_t a     = wls_split_decide_slave(0x55, corrupt);
+    const uint8_t      corrupt[4] = {0xFF, 0xFF, 0, 0};
+    wls_split_action_t a          = wls_split_decide_slave(0x55, corrupt);
     EXPECT_EQ(WLS_SPLIT_ACT_SYNC_DEVICE_INDEX, a.kind);
     EXPECT_EQ(WLS_SPLIT_DEVS_MIN, a.last_devs);
     EXPECT_EQ(WLS_SPLIT_DEVS_MIN, a.now_devs);
@@ -93,8 +93,8 @@ TEST(SplitLogic, sync_multimode_accepts_the_full_device_range) {
     /* The clamp must not narrow the legitimate range: every index the board
      * uses round-trips unchanged -- USB (0), BT1..BT5 (1..5), 2.4 GHz (6). */
     for (uint8_t devs = WLS_SPLIT_DEVS_MIN; devs <= WLS_SPLIT_DEVS_MAX; devs++) {
-        const uint8_t body[4] = {devs, devs, 0, 0};
-        wls_split_action_t a  = wls_split_decide_slave(0x55, body);
+        const uint8_t      body[4] = {devs, devs, 0, 0};
+        wls_split_action_t a       = wls_split_decide_slave(0x55, body);
         EXPECT_EQ(devs, a.last_devs);
         EXPECT_EQ(devs, a.now_devs);
     }
@@ -136,6 +136,51 @@ TEST(SplitLogic, the_contract_is_exactly_that_the_wake_must_be_reachable) {
     bool on_bt         = false;
     bool sends_wake_bt = (on_bt != true);
     EXPECT_TRUE(wls_split_can_order_sleep(sends_wake_bt));
+}
+
+/* --- Rung 3: the order executor, where the right is a PRECONDITION ---------
+ *
+ * `wls_split_can_order_sleep()` alone is a convention: a caller may forget to
+ * ask, or may send anyway. The executor makes the reachable-release fact a
+ * precondition of CONSTRUCTING the order, so "an order exists without a
+ * reachable release" is not representable. These vectors pin exactly that, at
+ * the construction site. */
+
+TEST(SplitLogic, the_executor_cannot_be_opened_permitted_when_the_wake_is_suppressed) {
+    /* The one-way order is not merely refused -- it cannot be built. On a
+     * transport that never sends 0xCC, every handle is unpermitted regardless of
+     * the flag, so the shell has nothing to send. */
+    wls_sleep_order_t refused_flag_one  = wls_sleep_order_open(/*sends_wake=*/false, 1);
+    wls_sleep_order_t refused_flag_zero = wls_sleep_order_open(/*sends_wake=*/false, 0);
+    EXPECT_FALSE(wls_sleep_order_permitted(&refused_flag_one));
+    EXPECT_FALSE(wls_sleep_order_permitted(&refused_flag_zero));
+}
+
+TEST(SplitLogic, the_executor_opens_permitted_when_the_release_is_reachable) {
+    wls_sleep_order_t order = wls_sleep_order_open(/*sends_wake=*/true, /*flag=*/1);
+    EXPECT_TRUE(wls_sleep_order_permitted(&order));
+}
+
+TEST(SplitLogic, the_executor_carries_the_sleep_flag_unchanged) {
+    /* The handle carries the body[0] the slave reads as its ordered-sleep flag.
+     * It must survive construction untouched -- the shell must not be able to
+     * reach a permitted order with a flag the transport did not imply. */
+    EXPECT_EQ(1, wls_sleep_order_open(true, 1).sleep_flag);
+    EXPECT_EQ(0, wls_sleep_order_open(true, 0).sleep_flag);
+}
+
+TEST(SplitLogic, the_executor_agrees_with_the_contract_it_replaces) {
+    /* The handle's permission is exactly `wls_split_can_order_sleep()`, for both
+     * transports: the stricter form cannot be more permissive than the rule it
+     * formalises, or it would open a hole where the plain rule had none. */
+    for (int sends_wake = 0; sends_wake <= 1; sends_wake++) {
+        wls_sleep_order_t order = wls_sleep_order_open(sends_wake != 0, 1);
+        EXPECT_EQ(wls_split_can_order_sleep(sends_wake != 0), wls_sleep_order_permitted(&order));
+    }
+}
+
+TEST(SplitLogic, a_null_executor_is_never_permitted) {
+    EXPECT_FALSE(wls_sleep_order_permitted(NULL));
 }
 
 } // namespace
