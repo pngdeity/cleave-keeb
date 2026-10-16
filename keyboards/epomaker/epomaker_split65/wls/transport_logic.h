@@ -245,6 +245,31 @@ bool hsm_module_may_act(bool ready);
  * `decision_is_usb` is whether the unconfirmed decision chose USB. */
 bool hsm_transport_may_drive_line(bool decision_is_usb);
 
+/* Whether a transport input is PURE -- whether it belongs to the alphabet the
+ * transport decision may read.
+ *
+ * The ADR's invariant has two halves, and this is the second: "`wls_usb_connect`
+ * may only be called as the consequence of a decision change, **and nothing in
+ * the line's own state may cause a decision change**." The first half (one call
+ * site, on a transition only) is the actuator rule. This is the input rule, and
+ * it is the one that CAUSED the livelock: `USB_ACTIVE` was an input to the
+ * decision, and driving the line (a consequence of the decision) restarts the
+ * driver, which clears `USB_ACTIVE`. The decision perturbed its own input, so a
+ * board whose switch read disagreed with the resolved host re-decided forever at
+ * the enumeration cadence.
+ *
+ * The rule is therefore: the transport decision reads INTENT (the switch
+ * position, the persisted index) and CONFIRMED HOST FACTS DELIVERED AS EVENTS
+ * (the `CONFIGURED`/`UNCONFIGURED` notification). It never reads the live state
+ * of the USB line, because that is a value the decision's own effect modifies.
+ *
+ * `reads_line_state` says whether an input reads a live USB-line signal
+ * (`usb_connected_state()`, `USB_DRIVER.state`, `USB_ACTIVE`). Returns false for
+ * it: a line-state read is exactly what makes the cycle writable, so an input
+ * that performs one is not a pure input no matter what else it reads. Stated
+ * purely so the alphabet is a checkable set rather than a convention. */
+bool hsm_transport_input_is_pure(bool reads_line_state);
+
 /* Whether the *switch really moved* between two pin reads.
  *
  * `wls.c`'s detector runs every 50 ms and used to ask "is the resolved

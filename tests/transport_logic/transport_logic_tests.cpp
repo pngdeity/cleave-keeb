@@ -269,7 +269,7 @@ TEST_F(TransportLogic, the_switch_decides_for_every_input_regardless_of_power) {
     for (hsm_switch_pos_t pos : positions) {
         for (uint8_t last_bt : last_bt_values) {
             /* With a host confirmed and without: a readable switch is honoured. */
-            hsm_switch_apply_t no_host  = hsm_input_rule(pos, last_bt, false);
+            hsm_switch_apply_t no_host   = hsm_input_rule(pos, last_bt, false);
             hsm_switch_apply_t with_host = hsm_input_rule(pos, last_bt, true);
             EXPECT_EQ(HSM_SWITCH_SETTLED, no_host.kind) << "pos " << int(pos);
             EXPECT_EQ(hsm_switch_apply(pos, last_bt).devs, no_host.devs) << "pos " << int(pos) << " last_bt " << int(last_bt);
@@ -548,7 +548,7 @@ TEST_F(TransportLogic, the_four_call_sites_keep_their_fallbacks) {
     EXPECT_EQ(DEVS_BT1, hsm_boot_devs(HSM_SWITCH_BT, DEVS_USB));      /* site 1: BT1  */
     EXPECT_EQ(DEVS_USB, hsm_boot_devs(HSM_SWITCH_UNKNOWN, DEVS_2G4)); /* site 1: USB  */
     EXPECT_EQ(0, hsm_profile_of_devs(DEVS_2G4));                      /* site 2: none */
-    EXPECT_EQ(DEVS_BT1, hsm_btdev_or(DEVS_USB, DEVS_BT1));          /* site 3: BT1  */
+    EXPECT_EQ(DEVS_BT1, hsm_btdev_or(DEVS_USB, DEVS_BT1));            /* site 3: BT1  */
 }
 
 /* The EEPROM recovery rule is the same predicate, now host-testable: a persisted
@@ -695,4 +695,49 @@ TEST_F(TransportLogic, channel_cue_is_total_over_the_device_range) {
         EXPECT_GE(c, HSM_CHAN_CUE_NONE);
         EXPECT_LE(c, HSM_CHAN_CUE_2G4);
     }
+}
+
+/* --- the input alphabet is pure (the ADR's second half) ----------------------
+ *
+ * The ADR's invariant has two halves. The first -- "`wls_usb_connect` may only
+ * be called as the consequence of a decision change" -- is the actuator rule,
+ * guarded by `bin/guard-invariants` F5 (one call site). This is the second:
+ * "nothing in the line's own state may cause a decision change." It is the half
+ * that CAUSED the livelock, because `USB_ACTIVE` was an input AND a consequence,
+ * so the decision perturbed its own input. The rule is that a transport input
+ * must not read the live USB-line state; host facts arrive as events instead.
+ * These vectors pin the predicate that states it. */
+
+TEST_F(TransportLogic, an_input_that_reads_the_usb_line_is_not_pure) {
+    /* The exact shape of the original defect: a decision input that samples the
+     * line the decision's own effect restarts. Impure, by definition. */
+    EXPECT_FALSE(hsm_transport_input_is_pure(true));
+}
+
+TEST_F(TransportLogic, an_input_that_reads_no_line_state_is_pure) {
+    /* The switch position, the persisted index, and an event-delivered host fact
+     * are the allowed alphabet: none of them reads a value the decision's effect
+     * can change. */
+    EXPECT_TRUE(hsm_transport_input_is_pure(false));
+}
+
+TEST_F(TransportLogic, purity_admits_every_real_input) {
+    /* Every genuine input the owner reads today is a non-line-state read, so the
+     * predicate accepts the whole alphabet -- it is a restriction on the class,
+     * not a rejection of the inputs in use. */
+    const bool reads_line_state[] = {false /* switch position        */, false /* persisted BT index      */, false /* host event (CONFIGURED) */, false /* host event (UNCONFIGURED) */};
+    for (bool r : reads_line_state) {
+        EXPECT_TRUE(hsm_transport_input_is_pure(r));
+    }
+}
+
+TEST_F(TransportLogic, the_two_halves_of_the_invariant_are_independent) {
+    /* The actuator rule and the input rule are different facts about different
+     * things: an unconfirmed USB decision MAY promote the line, while a
+     * line-state-reading input is NEVER pure. A caller cannot substitute one for
+     * the other. */
+    EXPECT_TRUE(hsm_transport_may_drive_line(true));   /* promote: allowed  */
+    EXPECT_FALSE(hsm_transport_input_is_pure(true));   /* read the line: no */
+    EXPECT_FALSE(hsm_transport_may_drive_line(false)); /* demote on a hint: no */
+    EXPECT_TRUE(hsm_transport_input_is_pure(false));   /* intent read: yes  */
 }

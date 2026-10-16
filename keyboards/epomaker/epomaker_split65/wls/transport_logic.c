@@ -148,6 +148,14 @@ bool hsm_transport_may_drive_line(bool decision_is_usb) {
     return decision_is_usb;
 }
 
+bool hsm_transport_input_is_pure(bool reads_line_state) {
+    /* A transport input that reads the live USB-line state is impure: the line
+     * is a value the decision's own effect modifies, so reading it lets the
+     * decision perturb its own input -- the livelock. Event-delivered host facts
+     * are the pure substitute (see the header). */
+    return !reads_line_state;
+}
+
 bool hsm_switch_moved(hsm_switch_pos_t now_pos, hsm_switch_pos_t last_pos, bool forced) {
     if (forced) {
         return true;
