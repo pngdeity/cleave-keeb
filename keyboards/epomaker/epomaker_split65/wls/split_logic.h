@@ -152,6 +152,21 @@ bool wls_sleep_order_permitted(const wls_sleep_order_t *order);
  * merely late. */
 #define WLS_SLEEP_ORDER_RELEASE_MS 120000
 
+/* The outstanding-order record the shell MUST keep: an order is a fact with a
+ * time, and a fact left unrecorded cannot be checked.
+ *
+ * The pure decision below is only as good as the shell that supplies it, and the
+ * shell had nothing to supply: nothing recorded that an order had been sent, so
+ * no liveness check could run. This is that record, and it is the reason the
+ * decision is reachable at all. The shell (wls.c) is the only writer; it stamps
+ * the record on the 0xAA send and clears it when it observes the release. */
+typedef struct {
+    uint32_t sent_at_ms;                   /* when 0xAA was sent; 0 = no order outstanding */
+    bool     release_carried_by_transport; /* whether 0xCC would have been sent for it */
+} wls_sleep_order_record_t;
+
+#define WLS_SLEEP_ORDER_RECORD_NONE ((wls_sleep_order_record_t){0, false})
+
 /* Whether an order outstanding since `sent_at_ms` should by now have been
  * released, given the release facts. `now_ms` is the current time.
  * `release_transport_still_carries` is whether the transport the order was sent

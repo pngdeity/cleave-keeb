@@ -10,6 +10,7 @@
 #include <stdbool.h>
 #include "wireless.h"
 #include "wls/transport_logic.h"
+#include "wls/split_logic.h"
 #include "wls/diag_logic.h"
 #include "wls/boot_code_logic.h"
 #include "connection.h"
@@ -45,6 +46,22 @@ extern bool bat_full_flag;
  * read as a query. One writer, no side-effecting reads. */
 void wls_order_sleep(bool ordered);
 bool wls_sleep_ordered(void);
+
+/* The outstanding cross-half order, recorded so its liveness is checkable. The
+ * record is written by the master on the 0xAA send and cleared when it observes
+ * the release; the decision it feeds is the pure
+ * `wls_sleep_order_outlived_release()` (split_logic). */
+void                     wls_note_sleep_order_sent(bool release_carried_by_transport);
+void                     wls_note_sleep_order_released(void);
+wls_sleep_order_record_t wls_sleep_order_record(void);
+bool                     wls_sleep_order_outstanding(void);
+
+/* The cross-half order's liveness report: consult
+ * `wls_sleep_order_outlived_release()` and report an order outstanding past its
+ * release window. A report, not an effect -- the only recovery is reaching a
+ * transport that carries 0xCC, which is the person's switch. Master and
+ * wireless only. Called from the module-poll tick. */
+void hs_sleep_order_liveness_check(void);
 bool hs_rgb_blink_hook(void);
 bool hs_mode_scan(bool update);
 /* The switch gate, stated once: may a wireless keycode for `target_devs` act,

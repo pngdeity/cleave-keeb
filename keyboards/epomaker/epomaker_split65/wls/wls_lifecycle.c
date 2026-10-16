@@ -177,6 +177,10 @@ void wls_lifecycle_suspend_wakeup_init_user(void) {
     }
 
     if (wls_split_send(WLS_SPLIT_CMD_WAKEUP, NULL)) {
+        /* The release has been sent: the outstanding order is discharged. This
+         * is the observable that answers the liveness question -- until it
+         * arrives, an order sent earlier is still outstanding. */
+        wls_note_sleep_order_released();
         dprintf("slave wakeup sent\n");
     } else {
         dprint("slave wakeup failed!\n");
@@ -227,6 +231,13 @@ bool wls_lifecycle_lpwr_allow_presleep(void) {
         if (wls_sleep_order_permitted(&order)) {
             const uint8_t body[4] = {order.sleep_flag, 0, 0, 0};
             if (wls_split_send(WLS_SPLIT_CMD_SLEEP, body)) {
+                /* Record the order so its LIVENESS is checkable: the send time,
+                 * and whether a release is even reachable on this transport. A
+                 * permitted order whose release is skipped (0xCC returns early
+                 * on USB) strands the slave until both halves are power-cycled;
+                 * without this record nothing could notice. See
+                 * `wls_sleep_order_outlived_release()` (split_logic). */
+                wls_note_sleep_order_sent(sends_wake);
                 dprintf("slave sleep sent\n");
             } else {
                 dprint("slave sleep failed!\n");
@@ -337,6 +348,11 @@ void wls_lifecycle_housekeeping(void) {
         hs_current_time = timer_read32();
         md_send_devctrl(hs_now_mode);
         md_send_devctrl(MD_SND_CMD_DEVCTRL_INQVOL);
+
+        /* The cross-half order's liveness check rides the same poll. It is a
+         * report, not an effect (see `hs_sleep_order_liveness_check`), so it
+         * belongs on the tick that already samples the board's slow facts. */
+        hs_sleep_order_liveness_check();
     }
 #endif
 }

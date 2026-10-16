@@ -54,6 +54,38 @@ bool wls_sleep_ordered(void) {
     return ordered_sleep;
 }
 
+/* The outstanding cross-half order, recorded so its LIVENESS is checkable.
+ *
+ * `wls_sleep_order_outlived_release()` (split_logic) can only decide an order's
+ * liveness if the shell hands it the order's send time. Nothing recorded it, so
+ * the decision had no caller -- the property was determined in the core but
+ * unavailable at the seam. This is the record, and one writer: the master stamps
+ * it when it sends 0xAA (`wls_lifecycle_lpwr_allow_presleep`) and clears it when
+ * it observes the release. Held here (not in the lifecycle file) because the
+ * reader `wls_sleep_order_outstanding()` is the board's query, beside the
+ * ordered-sleep flag that is the same concern's other half. */
+static wls_sleep_order_record_t outstanding_order = WLS_SLEEP_ORDER_RECORD_NONE;
+
+void wls_note_sleep_order_sent(bool release_carried_by_transport) {
+    outstanding_order.sent_at_ms                   = timer_read32();
+    outstanding_order.release_carried_by_transport = release_carried_by_transport;
+}
+
+void wls_note_sleep_order_released(void) {
+    outstanding_order = WLS_SLEEP_ORDER_RECORD_NONE;
+}
+
+wls_sleep_order_record_t wls_sleep_order_record(void) {
+    return outstanding_order;
+}
+
+bool wls_sleep_order_outstanding(void) {
+    /* The record is only meaningful with a nonzero stamp: 0 is "no order", and
+     * `timer_read32()` returning 0 at the top of a boot must not read as an
+     * order sent at time zero (which would be permanently expired). */
+    return outstanding_order.sent_at_ms != 0;
+}
+
 /* Boot counter for the diagnostic snapshot: increments once per MCU boot (the
  * board calls `wls_note_boot()` from `keyboard_post_init_kb`). A stable value
  * across successive diagnostic reads proves the MCU is NOT resetting; a value
@@ -374,6 +406,41 @@ void palcallback_cb(uint8_t line) {
 #endif
         default: {
         } break;
+    }
+}
+
+void hs_sleep_order_liveness_check(void) {
+    /* The liveness half of the cross-half contract, now that its record exists.
+     *
+     * The safety half (S2 rung 3) makes a one-way order UNREPRESENTABLE. It
+     * cannot cover the case where a permitted order IS sent and its release is
+     * then skipped: the master cannot see the slave (the RPC is
+     * request/response), so "the slave is asleep" is not observable from here.
+     * What IS observable is that an order has been outstanding longer than the
+     * transport allows. This consults the pure
+     * `wls_sleep_order_outlived_release()` and reports the residue to the
+     * diagnostic; it does not act, because the one recovery the master owns is
+     * to reach a transport that carries 0xCC (the switch), and that is the
+     * person's decision, not the firmware's.
+     *
+     * Master and wireless only: a slave never orders, and on USB no order is
+     * sent. See `docs/STATE-MACHINE-stop-wake-split.md` §5 (the liveness row). */
+    if (!is_keyboard_master()) {
+        return;
+    }
+    if (wireless_get_current_devs() == DEVS_USB) {
+        return;
+    }
+    if (!wls_sleep_order_outstanding()) {
+        return;
+    }
+
+    wls_sleep_order_record_t rec = wls_sleep_order_record();
+
+    /* `released` is false by construction: the record was cleared the moment the
+     * release was observed, so an outstanding record means none has been. */
+    if (wls_sleep_order_outlived_release(rec.sent_at_ms, timer_read32(), rec.release_carried_by_transport, false)) {
+        dprintf("sleep order outstanding past its release window\n");
     }
 }
 
