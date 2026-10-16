@@ -388,8 +388,15 @@ void wls_indicator_channel_state(void) {
         return;
     }
 
-    /* REJECT wins these LEDs (see the arbitration note). */
-    if (hsm_link_state_of_md((uint8_t)*md_getp_state()) == HSM_LINK_REJECT) {
+    /* REJECT wins these LEDs. The rule -- "the link-state cue outranks the
+     * at-rest channel cue on the LEDs they share" -- is stated once in the core
+     * (`wls_led_can_paint`), not by this return's position. Consulting it means
+     * a new higher-priority painter on the same LEDs (or a new reason the
+     * link-state cue is live) defers here automatically, instead of requiring a
+     * reader to notice this early return. The claim's liveness is the runtime
+     * REJECT fact; the ownership is the core's. */
+    bool reject_live = hsm_link_state_of_md((uint8_t)*md_getp_state()) == HSM_LINK_REJECT;
+    if (!wls_led_can_paint(HS_RGB_BLINK_INDEX_BT1, wls_indicator_boot_code_owns_matrix(), reject_live)) {
         return;
     }
 

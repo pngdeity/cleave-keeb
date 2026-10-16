@@ -156,3 +156,85 @@ bool wls_frame_owner_is_exclusive(wls_frame_owner_t owner);
  * the code and nothing else), else `WLS_FRAME_OWNER_NONE` (the caller runs the
  * rest of the pass). Pure. */
 wls_frame_owner_t wls_frame_owner_of(bool exclusive_claim_live);
+
+/* --- LED-index ownership: which painter owns which index, and who wins an -----
+ *     overlap
+ *
+ * `wls_frame_owner_of()` above arbitrates the FRAME: a single exclusive owner
+ * suppresses the whole pass. It deliberately says nothing about the LEDs the
+ * non-exclusive painters write, and that is D3: two non-exclusive painters that
+ * write the same index still resolved by *call order*, so the winner was a line
+ * number and moving a paint call across another changed which indicator the
+ * board showed, with nothing failing.
+ *
+ * The gap has a shape. Every painter writes a KNOWN, FIXED set of indices (all
+ * of them are `config.h` constants or literals), except the set-flash pass,
+ * whose armed entry may carry the `0xFF` "all LEDs" sentinel
+ * (`wls_indicator_set_flash`, `wls_indicator.c`). So "who owns index N" is a
+ * pure function of N once each painter's set and the overlap precedence are
+ * stated once. That statement is this:
+ *
+ *   1. The painters are enumerated in the same order the frame pass runs them,
+ *      highest priority first. The ORDER IS THE POLICY, restated here so a
+ *      reader does not reconstruct arbitration from call order.
+ *   2. A painter owns an index when the index is in its declared set; the
+ *      all-LEDs painter owns every index.
+ *   3. On an overlap the earlier painter (higher priority) wins. The two real
+ *      overlaps today are link-state vs channel cue (17/18/19) and channel flash
+ *      vs channel cue (the same LEDs); the first is already arbitrated in the
+ *      shell by an early return, and this makes that arbitration a rule of the
+ *      core rather than a property of the return's position.
+ *
+ * `WLS_LED_PAINTER_NONE` means no listed painter owns the index -- it belongs to
+ * the open-ended painters (the keymap's `rgb_matrix_indicators_advanced_user`,
+ * rgblight), which this core cannot enumerate and therefore does not claim. */
+typedef enum {
+    WLS_LED_PAINTER_NONE = 0,
+    WLS_LED_PAINTER_BOOT_CODE,    /* exclusive: every index (rgb_matrix_set_color_all) */
+    WLS_LED_PAINTER_LINK_STATE,   /* BT1/2/3 (17/18/19): the REJECT cue */
+    WLS_LED_PAINTER_CHANNEL_FLASH,/* the transition flash (17/18/19/20, 41/42) */
+    WLS_LED_PAINTER_CHANNEL_CUE,  /* the at-rest channel cue (17/18/19/20) */
+    WLS_LED_PAINTER_BATTERY,      /* 63/64/65: the battery indicator */
+    WLS_LED_PAINTER_SET_FLASH,    /* its armed index, or all (0xFF) */
+    WLS_LED_PAINTER_MARKER,       /* the confinfo.filp marker (32) */
+} wls_led_painter_t;
+
+/* The `0xFF` entry index: an armed set-flash that repaints every LED. This is a
+ * sentinel, not a real LED, so it must never be compared as an index. */
+#define WLS_LED_INDEX_ALL 0xFFu
+
+/* Which painter wins LED `index`, by the precedence above. `index` may be any
+ * uint8_t and `WLS_LED_INDEX_ALL` is treated as the wildcard it is.
+ *
+ * `boot_code_claim_live` is the same FACT the frame arbiter takes
+ * (`wls_indicator_boot_code_owns_matrix()`), because the boot code owns every
+ * LED only while its claim is live. Taking it here -- rather than assuming the
+ * boot code always wins -- keeps the LED rule conditioned on the same fact as
+ * the frame rule, so the two cannot disagree. Pure. */
+wls_led_painter_t wls_led_painter_of(uint8_t index, bool boot_code_claim_live);
+
+/* Whether a painter owns every LED, so it composes with no other by index. The
+ * boot code is the only exclusive painter: it writes every LED through
+ * `rgb_matrix_set_color_all`. The set-flash pass *can* write every LED (when its
+ * armed entry carries `WLS_LED_INDEX_ALL`), but it is not exclusive -- its
+ * ordinary case writes one index, so it composes. Kept as a switch over the enum
+ * so a new painter's exclusivity is decided here, with the tests that pin it --
+ * not a silent property of a new enum value. This is D4's home. Pure. */
+bool wls_led_painter_is_exclusive(wls_led_painter_t painter);
+
+/* Whether the two painters can ever write the same LED, so the precedence above
+ * is doing real work between them. Derived from the same sets `wls_led_painter_of`
+ * uses, with one honest exception: the set-flash pass is armed on its index at
+ * runtime, so it *can* touch any LED and overlaps anyone. Pure. */
+bool wls_led_painters_overlap(wls_led_painter_t a, wls_led_painter_t b);
+
+/* Whether the at-rest channel cue (the lowest-priority painter that writes a
+ * channel LED) may paint `index` this frame.
+ *
+ * The cue shares 17/18/19/20 with two higher-priority painters: the exclusive
+ * boot code (while its claim is live) and the link-state cue (while REJECT is
+ * live). Asking rather than testing positionally means the shell's suppression
+ * is the core's precedence, not the line a `return` sits on. The two liveness
+ * facts are passed in because they are runtime state the core cannot read.
+ * Returns true when the cue owns the index and no higher live claim does. Pure. */
+bool wls_led_can_paint(uint8_t index, bool boot_code_claim_live, bool reject_live);

@@ -181,4 +181,82 @@ TEST(IndicatorLogic, only_an_exclusive_owner_suppresses_the_frame) {
     EXPECT_FALSE(wls_frame_owner_is_exclusive(none));
 }
 
+/* LED-index ownership (D3/D4). The frame arbiter says who owns a FRAME; nothing
+ * said who owns an LED, so two non-exclusive painters writing the same index
+ * resolved by call order -- a line number -- and moving a paint call changed the
+ * sight with nothing failing. These vectors pin the winner as a rule. */
+TEST(IndicatorLogic, the_boot_code_owns_every_led_index_while_its_claim_lives) {
+    EXPECT_EQ(WLS_LED_PAINTER_BOOT_CODE, wls_led_painter_of(0, true));
+    EXPECT_EQ(WLS_LED_PAINTER_BOOT_CODE, wls_led_painter_of(17, true));
+    EXPECT_EQ(WLS_LED_PAINTER_BOOT_CODE, wls_led_painter_of(64, true));
+    /* The all-LEDs sentinel is owned by the all-LEDs painter too. */
+    EXPECT_EQ(WLS_LED_PAINTER_BOOT_CODE, wls_led_painter_of(WLS_LED_INDEX_ALL, true));
+}
+
+TEST(IndicatorLogic, with_the_claim_cleared_the_leds_belong_to_their_own_painters) {
+    /* The same indices now resolve to the non-exclusive precedence, which is the
+     * property that keeps the boot code from owning the LEDs forever. */
+    EXPECT_EQ(WLS_LED_PAINTER_LINK_STATE, wls_led_painter_of(17, false));
+    EXPECT_EQ(WLS_LED_PAINTER_BATTERY, wls_led_painter_of(64, false));
+}
+
+TEST(IndicatorLogic, the_reject_cue_wins_the_channel_leds_it_shares) {
+    /* 17/18/19 are written by the link-state cue, the channel flash and the
+     * channel cue. REJECT must win -- that is the arbitration the shell performs
+     * with an early return; here it is the precedence. */
+    EXPECT_EQ(WLS_LED_PAINTER_LINK_STATE, wls_led_painter_of(17, false));
+    EXPECT_EQ(WLS_LED_PAINTER_LINK_STATE, wls_led_painter_of(18, false));
+    EXPECT_EQ(WLS_LED_PAINTER_LINK_STATE, wls_led_painter_of(19, false));
+}
+
+TEST(IndicatorLogic, an_led_only_the_flash_writes_belongs_to_the_flash) {
+    /* 20 (2.4G) and the BT4/BT5 literals 41/42 are flash-only. */
+    EXPECT_EQ(WLS_LED_PAINTER_CHANNEL_FLASH, wls_led_painter_of(20, false));
+    EXPECT_EQ(WLS_LED_PAINTER_CHANNEL_FLASH, wls_led_painter_of(41, false));
+    EXPECT_EQ(WLS_LED_PAINTER_CHANNEL_FLASH, wls_led_painter_of(42, false));
+}
+
+TEST(IndicatorLogic, the_battery_and_marker_leds_have_their_owners) {
+    EXPECT_EQ(WLS_LED_PAINTER_BATTERY, wls_led_painter_of(63, false));
+    EXPECT_EQ(WLS_LED_PAINTER_BATTERY, wls_led_painter_of(64, false));
+    EXPECT_EQ(WLS_LED_PAINTER_BATTERY, wls_led_painter_of(65, false));
+    EXPECT_EQ(WLS_LED_PAINTER_MARKER, wls_led_painter_of(32, false));
+}
+
+TEST(IndicatorLogic, an_unlisted_index_belongs_to_no_enumerated_painter) {
+    /* The keymap's and rgblight's LEDs are open-ended, so the core claims none
+     * of them -- they are not an unprotected overlap, they are simply not this
+     * table's to arbitrate. */
+    EXPECT_EQ(WLS_LED_PAINTER_NONE, wls_led_painter_of(1, false));
+    EXPECT_EQ(WLS_LED_PAINTER_NONE, wls_led_painter_of(2, false));
+    EXPECT_EQ(WLS_LED_PAINTER_NONE, wls_led_painter_of(99, false));
+}
+
+TEST(IndicatorLogic, only_the_boot_code_is_exclusive_over_leds) {
+    EXPECT_TRUE(wls_led_painter_is_exclusive(WLS_LED_PAINTER_BOOT_CODE));
+    EXPECT_FALSE(wls_led_painter_is_exclusive(WLS_LED_PAINTER_LINK_STATE));
+    EXPECT_FALSE(wls_led_painter_is_exclusive(WLS_LED_PAINTER_CHANNEL_FLASH));
+    EXPECT_FALSE(wls_led_painter_is_exclusive(WLS_LED_PAINTER_CHANNEL_CUE));
+    EXPECT_FALSE(wls_led_painter_is_exclusive(WLS_LED_PAINTER_BATTERY));
+    EXPECT_FALSE(wls_led_painter_is_exclusive(WLS_LED_PAINTER_SET_FLASH));
+    EXPECT_FALSE(wls_led_painter_is_exclusive(WLS_LED_PAINTER_MARKER));
+    EXPECT_FALSE(wls_led_painter_is_exclusive(WLS_LED_PAINTER_NONE));
+}
+
+TEST(IndicatorLogic, the_real_overlaps_are_the_ones_the_precedence_resolves) {
+    /* The three channel painters share LEDs; the set-flash pass shares with
+     * everything (it can write any index); the rest are disjoint. This is what
+     * makes the precedence do real work rather than restate a partition. */
+    EXPECT_TRUE(wls_led_painters_overlap(WLS_LED_PAINTER_LINK_STATE, WLS_LED_PAINTER_CHANNEL_FLASH));
+    EXPECT_TRUE(wls_led_painters_overlap(WLS_LED_PAINTER_LINK_STATE, WLS_LED_PAINTER_CHANNEL_CUE));
+    EXPECT_TRUE(wls_led_painters_overlap(WLS_LED_PAINTER_CHANNEL_FLASH, WLS_LED_PAINTER_CHANNEL_CUE));
+    EXPECT_TRUE(wls_led_painters_overlap(WLS_LED_PAINTER_SET_FLASH, WLS_LED_PAINTER_BATTERY));
+
+    EXPECT_FALSE(wls_led_painters_overlap(WLS_LED_PAINTER_BATTERY, WLS_LED_PAINTER_CHANNEL_CUE));
+    EXPECT_FALSE(wls_led_painters_overlap(WLS_LED_PAINTER_BATTERY, WLS_LED_PAINTER_MARKER));
+    EXPECT_FALSE(wls_led_painters_overlap(WLS_LED_PAINTER_MARKER, WLS_LED_PAINTER_CHANNEL_FLASH));
+    /* No enumerated painter overlaps "none". */
+    EXPECT_FALSE(wls_led_painters_overlap(WLS_LED_PAINTER_NONE, WLS_LED_PAINTER_BOOT_CODE));
+}
+
 } // namespace
